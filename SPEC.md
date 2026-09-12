@@ -6,12 +6,15 @@ Code session logs. Built with GPUI (Rust). Sibling of daybar and mailbar: same s
 language, same repo layout. MIT, open source.
 
 ## Reference
-- `docs/mockup-popover-v2.dc.html` — the approved popover ("Native A", HTML/CSS). Match its
-  tokens: background `#f6f6f6` light (`#28282a` dark), text `#1d1d1f`, secondary `#6e6e73`,
-  tertiary `#aeaeb2`, separators and bar tracks `rgba(0,0,0,0.09)`, system red `#d70015` for a
-  limit that is nearly spent — and nothing else with a hue. Popover **260px** wide, 10px
-  radius, hairline border. Font: system (`.SystemUIFont`); the Today values in `SF Mono`. All
-  tokens live in `src/ui/theme.rs`.
+- `docs/mockup-popover-v2.dc.html` — the approved popover ("Native A", HTML/CSS). Its tokens
+  were then tuned against the system Battery menu on a live screen, and `src/ui/theme.rs` is
+  the source of truth: material `#ececee` at 85% over a blurred window (light; `#28282a` dark),
+  text black at 85%, secondary `#6e6e73`, tertiary `#aeaeb2`, separators and bar tracks
+  `rgba(0,0,0,0.09)`, a 6% rim, system red `#d70015` for a limit that is nearly spent — and
+  nothing else with a hue. Popover **260px** wide, 10px radius, no gap under the menu bar.
+  Font: system (`.SystemUIFont`); the Today values in `SF Mono`.
+- `docs/mockup-popover.dc.html` — the first, card-style popover, superseded by v2 and kept for
+  the record.
 - `docs/mockup-menubar.dc.html` — the approved menu bar item: percentage then ring, the way the
   battery item sits, and the red state.
 

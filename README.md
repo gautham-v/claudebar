@@ -1,13 +1,15 @@
 # claudebar
 
 A macOS menu bar view of your Claude usage limits, written in Rust with [GPUI](https://www.gpui.rs/).
-Sibling of [daybar](../daybar) and [mailbar](../mailbar): same stack, same visual language.
+Sibling of [daybar](https://github.com/gautham-v/daybar) and
+[mailbar](https://github.com/gautham-v/mailbar): same stack, same visual language.
 
-The menu bar shows one number and a small ring — how much of the window you are tracking you have used — the
-current five-hour session by default — sitting the way the battery item does, percentage first and glyph after.
-The ring is drawn at runtime as a template image, so it tints itself for light and dark like the
-system glyphs do; with 20% or less of the window left (`low_remaining_percent`) both the number and the ring go red. Click
-it and a 260px popover drops down, shaped like the system Battery menu: a thin bar per limit
+The menu bar shows one number and a small ring: how much of your current five-hour session you
+have used (or the weekly limit, if you would rather track that), sitting the way the battery item
+does, percentage first and glyph after. The ring is drawn at runtime as a template image, so it
+tints itself for light and dark like the system glyphs do; with 20% or less of the window left,
+both the number and the ring go red. Click it and a 260px popover drops down, shaped like the
+system Battery menu: a thin bar per limit
 (session, week, and one per model your plan meters separately) with when each one resets under
 it. Under that, what you did today — sessions, tool calls and tokens — and a seven-bar
 sparkline of the last week, read straight out of the Claude Code session logs on this machine.
