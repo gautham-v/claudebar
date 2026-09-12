@@ -7,15 +7,17 @@ The menu bar shows one number and a small ring — how much of the window you ar
 current five-hour session by default — sitting the way the battery item does, percentage first and glyph after.
 The ring is drawn at runtime as a template image, so it tints itself for light and dark like the
 system glyphs do; with 20% or less of the window left (`low_remaining_percent`) both the number and the ring go red. Click
-it and a 320px popover drops down with a ring per limit (session, week, and one per model your
-plan meters separately), each with what it resets to and when. Under that, what you did today —
-sessions, tool calls, tokens, and a bar per model — and a seven-day sparkline of tokens per day,
-read straight out of the Claude Code session logs on this machine. A footer says when it last
-updated and offers Refresh and a link to claude.ai. No Dock icon, no windows.
+it and a 260px popover drops down, shaped like the system Battery menu: a thin bar per limit
+(session, week, and one per model your plan meters separately) with when each one resets under
+it. Under that, what you did today — sessions, tool calls and tokens — and a seven-bar
+sparkline of the last week, read straight out of the Claude Code session logs on this machine.
+Then plain menu rows: Refresh, Open claude.ai, Settings, Launch at login and Quit. The whole
+surface is ink on the system material; the only colour in it is the red a bar goes when the
+window is nearly spent. No Dock icon, no windows.
 
 It follows the system light/dark appearance.
 
-![the claudebar popover: three rings, today's totals, and the last seven days](docs/screenshot.png)
+![the claudebar popover: a bar per limit, today's totals, the last seven days and the menu rows](docs/screenshot.png)
 
 <!-- Captured from `cargo run --example popover_preview` (stub data, no token). -->
 
@@ -36,14 +38,15 @@ make check    # cargo fmt --check && cargo clippy --all-targets -D warnings
 single log file, against stub data:
 
 ```sh
-cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|menu
+cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|settings
 ```
 
 ## Settings
 
-claudebar runs with no configuration. What little there is to choose lives in the `···` menu —
-a **Menu bar shows** section with one row per limit (Session, Week, and each model your plan
-meters separately) and a **Show percentage** toggle — and is written to
+claudebar runs with no configuration. What little there is to choose lives behind the popover's
+**Settings** row, which expands in place — a **Menu bar shows** group with one row per limit
+(Session, Week, and each model your plan meters separately) and a **Show percentage** toggle —
+and is written to
 `~/.config/claudebar/config.toml`, which you can also edit by hand:
 
 | key | default | what it does |
@@ -53,7 +56,7 @@ meters separately) and a **Show percentage** toggle — and is written to
 | `low_remaining_percent` | `20.0` | how little of a window has to be left before the ring and the number go red |
 | `refresh_minutes` | `5` | how often the limits and the local scan are refetched; read once at startup |
 
-The menu-bar section of the `···` menu writes that same file, so a choice made there survives a
+The Settings section writes that same file, so a choice made there survives a
 relaunch. Every key is optional: a file with one line in it is a valid file, unknown keys are
 ignored, and a file that does not parse is ignored with one muted line in the popover saying so
 rather than stopping the app.
@@ -63,7 +66,7 @@ rather than stopping the app.
 Two sources, both already on your machine. claudebar has no account of its own, no server, and
 nothing to configure beyond the handful of display settings above.
 
-**The rings** come from `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint
+**The limit bars** come from `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint
 Claude Code's own `/usage` command calls, with the same OAuth bearer token. That token is read
 out of your login Keychain, from the item Claude Code already put there (service
 `Claude Code-credentials`). claudebar only ever *reads* it: it never refreshes it, never writes
@@ -83,7 +86,7 @@ one above.
 
 ### Launch at login
 
-The `···` menu has a **Launch at login** toggle, backed by `SMAppService` (macOS 13+). It shows
+The popover has a **Launch at login** row, backed by `SMAppService` (macOS 13+). It shows
 a checkmark whenever macOS reports the login item as enabled, so it agrees with
 **System Settings › General › Login Items**, where Claudebar appears once it is on.
 
@@ -121,7 +124,7 @@ asking.
 | | |
 |---|---|
 | `r` | refresh |
-| `Esc` | close the `···` menu, then the popover |
+| `Esc` | collapse the Settings section, then close the popover |
 
 ## Privacy
 
@@ -143,7 +146,7 @@ never leave the machine. There is no telemetry and no analytics. The only file c
 - `src/local.rs` — the session-log scan.
 - `src/store_provider.rs` — the seam: both sources run on `cx.background_executor()` and
   re-render the popover and the menu bar icon on the main thread when they land.
-- `src/ui/` — `popover.rs` over a `UsageProvider` trait, plus `rings`, `stats`, `theme`.
+- `src/ui/` — `popover.rs` over a `UsageProvider` trait, plus `stats` and `theme`.
 - `scripts/bundle.sh` — builds `Claudebar.app`.
 
 ## License

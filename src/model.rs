@@ -47,18 +47,20 @@ impl Limit {
         self.percent >= 100.0 - low_remaining_percent
     }
 
-    /// The reset time as the mockup shows it: "6:29 PM" when it is today,
-    /// "Wed 7:59 PM" otherwise. `None` when the API gave no reset.
-    pub fn reset_caption(&self, now: DateTime<Local>) -> Option<String> {
+    /// When the window resets, as the popover's subtitle phrases it: "Resets
+    /// at 6:29 PM" when that is today, "Resets Wed at 7:59 PM" when it is
+    /// later in the week. `None` when the API gave no reset, so the subtitle
+    /// is dropped rather than printed empty.
+    pub fn reset_sentence(&self, now: DateTime<Local>) -> Option<String> {
         let at = self.resets_at?.with_timezone(&Local);
         Some(if at.date_naive() == now.date_naive() {
-            at.format("%-I:%M %p").to_string()
+            format!("Resets at {}", at.format("%-I:%M %p"))
         } else {
-            at.format("%a %-I:%M %p").to_string()
+            format!("Resets {} at {}", at.format("%a"), at.format("%-I:%M %p"))
         })
     }
 
-    /// The whole-number percent the menu bar and rings print.
+    /// The whole-number percent the menu bar and the bars print.
     pub fn percent_rounded(&self) -> u32 {
         self.percent.round().clamp(0.0, 100.0) as u32
     }
@@ -180,8 +182,10 @@ mod tests {
         assert_eq!(fable.label(), "Fable");
     }
 
+    /// Today's reset drops the weekday; a later one keeps it, and both read
+    /// as a sentence.
     #[test]
-    fn reset_caption_drops_the_weekday_for_today() {
+    fn the_reset_sentence_says_at_for_both_shapes() {
         let now = Local.with_ymd_and_hms(2026, 9, 12, 13, 37, 0).unwrap();
         let today = Local.with_ymd_and_hms(2026, 9, 12, 18, 29, 0).unwrap();
         let later = Local.with_ymd_and_hms(2026, 9, 16, 19, 59, 0).unwrap();
@@ -189,13 +193,16 @@ mod tests {
             resets_at: Some(today.with_timezone(&Utc)),
             ..limit(2.0)
         };
-        assert_eq!(l.reset_caption(now).as_deref(), Some("6:29 PM"));
+        assert_eq!(l.reset_sentence(now).as_deref(), Some("Resets at 6:29 PM"));
         let l = Limit {
             resets_at: Some(later.with_timezone(&Utc)),
             ..limit(18.0)
         };
-        assert_eq!(l.reset_caption(now).as_deref(), Some("Wed 7:59 PM"));
-        assert_eq!(limit(1.0).reset_caption(now), None);
+        assert_eq!(
+            l.reset_sentence(now).as_deref(),
+            Some("Resets Wed at 7:59 PM")
+        );
+        assert_eq!(limit(1.0).reset_sentence(now), None);
     }
 
     #[test]

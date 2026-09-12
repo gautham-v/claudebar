@@ -1,9 +1,13 @@
-//! Visual tokens from the approved mockups in `docs/`, as gpui types.
+//! Visual tokens from the approved mockup in `docs/`, as gpui types.
 //!
 //! Colors live in [`Theme`], which comes in a light and a dark set picked from
 //! the window's appearance; sizes and the type scale are appearance-independent
 //! consts. Everything the views need should come from here — no literal colors
-//! or magic numbers in `popover.rs`, `rings.rs`, `stats.rs`.
+//! or magic numbers in `popover.rs`, `stats.rs`.
+//!
+//! The popover is deliberately monochrome, the way the system Battery menu is:
+//! ink on a near-white material, with [`Theme::warning`] the only colour in
+//! the whole surface and only when a limit is nearly spent.
 
 use gpui::{px, Pixels, Rgba, WindowAppearance};
 
@@ -28,53 +32,43 @@ const fn hex_a(value: u32, alpha: f32) -> Rgba {
 /// The appearance-dependent half of the tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
-    /// Popover background (fully opaque).
+    /// Popover background — the material the rows sit on.
     pub bg: Rgba,
     /// Hairline border around the popover.
     pub border: Rgba,
-    /// Primary text.
+    /// Primary text, and — the popover has no accent — the fill of every bar.
     pub text: Rgba,
-    /// Secondary text: the plan, ring labels and captions, stat tile labels.
+    /// Secondary text: percentages, reset captions, the values on the Today
+    /// rows.
     pub secondary: Rgba,
-    /// Tertiary text: the weekday row and the footer.
+    /// Tertiary text: the "Menu bar shows" section label and the notes under
+    /// the login row.
     pub tertiary: Rgba,
-    /// Separator rules, and — the mockup uses the same value — the ring track
-    /// and the unfilled part of a model bar.
+    /// Separator rules, and — the mockup uses the same value — the track a
+    /// limit bar is drawn in.
     pub separator: Rgba,
-    /// System blue: ring arcs and the spark bar for today.
-    pub accent: Rgba,
-    /// Text drawn on top of [`Theme::accent`].
-    pub on_accent: Rgba,
-    /// System red: a ring whose limit [`is_low`](crate::model::Limit::is_low).
+    /// System red: a limit that [`is_low`](crate::model::Limit::is_low). The
+    /// only colour in the popover.
     pub warning: Rgba,
-    /// Hover wash on a button or a menu row.
+    /// Hover wash on a menu row.
     pub hover: Rgba,
-    /// Background of the "···" menu.
-    pub menu_bg: Rgba,
-    /// The filled part of a per-model bar. Deliberately not the accent: the
-    /// mockup keeps blue for limits and draws the model split in ink.
-    pub model_bar: Rgba,
 }
 
 /// Light appearance (the mockup's own palette).
 pub const LIGHT: Theme = Theme {
     bg: Rgba {
-        r: 240.0 / 255.0,
-        g: 240.0 / 255.0,
-        b: 242.0 / 255.0,
-        a: 1.0,
+        r: 246.0 / 255.0,
+        g: 246.0 / 255.0,
+        b: 246.0 / 255.0,
+        a: BG_ALPHA,
     },
-    border: hex_a(0x000000, 0.12),
+    border: hex_a(0x000000, 0.14),
     text: hex(0x1d1d1f),
     secondary: hex(0x6e6e73),
     tertiary: hex(0xaeaeb2),
-    separator: hex_a(0x000000, 0.08),
-    accent: hex(0x0a7aff),
-    on_accent: hex(0xffffff),
+    separator: hex_a(0x000000, 0.09),
     warning: hex(0xd70015),
-    hover: hex_a(0x000000, 0.05),
-    menu_bg: hex(0xf7f7f9),
-    model_bar: hex_a(0x1d1d1f, 0.55),
+    hover: hex_a(0x000000, 0.06),
 };
 
 /// Dark appearance: the same roles against a dark material.
@@ -83,20 +77,23 @@ pub const DARK: Theme = Theme {
         r: 40.0 / 255.0,
         g: 40.0 / 255.0,
         b: 42.0 / 255.0,
-        a: 1.0,
+        a: BG_ALPHA,
     },
     border: hex_a(0xffffff, 0.14),
     text: hex(0xf5f5f7),
     secondary: hex(0x98989d),
     tertiary: hex(0x8e8e93),
-    separator: hex_a(0xffffff, 0.10),
-    accent: hex(0x0a84ff),
-    on_accent: hex(0xffffff),
+    separator: hex_a(0xffffff, 0.12),
     warning: hex(0xff453a),
-    hover: hex_a(0xffffff, 0.08),
-    menu_bg: hex(0x3a3a3c),
-    model_bar: hex_a(0xf5f5f7, 0.55),
+    hover: hex_a(0xffffff, 0.10),
 };
+
+/// How opaque the popover material is. A translucent value over a
+/// [`Blurred`](gpui::WindowBackgroundAppearance::Blurred) window gives real
+/// vibrancy — the mockup's `0.80` — but gpui's blur is not a system
+/// `NSVisualEffectView`, so it is kept opaque until someone has looked at it on
+/// a live screen. Lower this and switch `main.rs` back to `Blurred` to try.
+pub const BG_ALPHA: f32 = 1.0;
 
 impl Default for Theme {
     fn default() -> Self {
@@ -113,73 +110,111 @@ impl Theme {
         }
     }
 
-    /// The spark bar colour for a day that is not today: the accent, faded, so
-    /// the seven bars read as one series with today picked out of it.
+    /// The spark bar colour for a day that is not today: the ink, faded far
+    /// enough back that today reads as the one bar being pointed at.
     pub fn spark_past(&self) -> Rgba {
         Rgba {
             a: SPARK_PAST_ALPHA,
-            ..self.accent
+            ..self.text
+        }
+    }
+
+    /// The fill of a limit bar: ink, or red once the window is nearly spent.
+    pub fn limit_bar(&self, is_low: bool) -> Rgba {
+        if is_low {
+            self.warning
+        } else {
+            self.text
         }
     }
 }
 
-/// Alpha applied to the accent for the six days before today.
-pub const SPARK_PAST_ALPHA: f32 = 0.35;
+/// Alpha applied to the ink for the six days before today.
+pub const SPARK_PAST_ALPHA: f32 = 0.18;
 
 // ── Sizes ────────────────────────────────────────────────────────────────────
 
 /// Popover width. Fixed; height grows with content.
-pub const POPOVER_WIDTH: Pixels = px(320.);
+pub const POPOVER_WIDTH: Pixels = px(260.);
 /// Corner radius of the popover.
-pub const POPOVER_RADIUS: Pixels = px(11.);
+pub const POPOVER_RADIUS: Pixels = px(10.);
 /// Gap between the menu bar and the top of the popover.
 pub const POPOVER_TOP_GAP: Pixels = px(6.);
-
-/// Horizontal padding for the header, the rules, and every block.
-pub const PAD_X: Pixels = px(14.);
-/// Size of the header's "···" button.
-pub const ICON_BUTTON: Pixels = px(22.);
-
-/// Outer diameter of a limit ring.
-pub const RING_SIZE: Pixels = px(56.);
-/// Stroke width of both the track and the arc.
-pub const RING_STROKE: Pixels = px(6.);
-/// Gap between rings in the row.
-pub const RING_GAP: Pixels = px(8.);
-/// Gap between the ring, its label and its reset caption.
-pub const RING_LABEL_GAP: Pixels = px(6.);
-
-/// Height of a per-model bar, as a plain float so the layout constants that add
-/// it up stay `const`.
-pub const MODEL_BAR_HEIGHT_PX: f32 = 6.0;
+/// The menu inset: the padding between the popover's edge and its rows, as a
+/// plain float so the layout constants that add it up stay `const`.
+pub const POPOVER_PAD_PX: f32 = 5.0;
 /// The same, as gpui's unit.
-pub const MODEL_BAR_HEIGHT: Pixels = px(MODEL_BAR_HEIGHT_PX);
-/// Corner radius of a per-model bar.
-pub const MODEL_BAR_RADIUS: Pixels = px(3.);
-/// The tallest a spark bar gets; the busiest day of the week is drawn this tall
-/// and the others are scaled against it.
-pub const SPARK_MAX_HEIGHT: Pixels = px(28.);
-/// Gap between spark bars.
+pub const POPOVER_PAD: Pixels = px(POPOVER_PAD_PX);
+
+/// Horizontal padding inside a row — the text inset every line shares.
+pub const ROW_PAD_X: Pixels = px(10.);
+/// Vertical padding inside a row.
+pub const ROW_PAD_Y_PX: f32 = 3.0;
+pub const ROW_PAD_Y: Pixels = px(ROW_PAD_Y_PX);
+/// Corner radius of a row's hover wash.
+pub const ROW_RADIUS: Pixels = px(6.);
+/// How far a settings row is indented under its disclosure row.
+pub const ROW_INDENT: Pixels = px(12.);
+
+/// A separator is inset from the popover's edges the way a menu's is.
+pub const SEPARATOR_INSET: Pixels = px(10.);
+/// The air above and below a separator.
+pub const SEPARATOR_MARGIN_PX: f32 = 5.0;
+pub const SEPARATOR_MARGIN: Pixels = px(SEPARATOR_MARGIN_PX);
+/// A hairline.
+pub const HAIRLINE_PX: f32 = 1.0;
+pub const HAIRLINE: Pixels = px(HAIRLINE_PX);
+
+/// Height of a limit's progress bar.
+pub const LIMIT_BAR_HEIGHT_PX: f32 = 4.0;
+pub const LIMIT_BAR_HEIGHT: Pixels = px(LIMIT_BAR_HEIGHT_PX);
+/// Corner radius of a limit bar.
+pub const LIMIT_BAR_RADIUS: Pixels = px(2.);
+/// The gap between a limit's label row, its bar and its reset caption.
+pub const LIMIT_GAP_PX: f32 = 4.0;
+pub const LIMIT_GAP: Pixels = px(LIMIT_GAP_PX);
+/// The gap between one limit block and the next.
+pub const LIMIT_BLOCK_GAP_PX: f32 = 8.0;
+pub const LIMIT_BLOCK_GAP: Pixels = px(LIMIT_BLOCK_GAP_PX);
+
+/// The tallest a spark bar gets; the busiest day of the week is drawn this
+/// tall and the others are scaled against it.
+pub const SPARK_MAX_HEIGHT_PX: f32 = 16.0;
+pub const SPARK_MAX_HEIGHT: Pixels = px(SPARK_MAX_HEIGHT_PX);
+/// Width of one spark bar, and the gap between two.
+pub const SPARK_BAR_WIDTH: Pixels = px(8.);
 pub const SPARK_GAP: Pixels = px(3.);
 /// Corner radius of a spark bar.
-pub const SPARK_RADIUS: Pixels = px(2.);
+pub const SPARK_RADIUS: Pixels = px(1.5);
 
 // ── Type scale ───────────────────────────────────────────────────────────────
 
-/// Section titles ("Today", "Last 7 days") and the header.
+/// Section headers ("Claude Usage", "Today") and every menu row.
 pub const TEXT_TITLE: Pixels = px(13.);
 /// Body text.
 pub const TEXT_BODY: Pixels = px(13.);
-/// The plan, ring labels, model names.
+/// The signed-out / loading line.
 pub const TEXT_SMALL: Pixels = px(12.);
-/// Reset captions, stat tile labels, the footer.
+/// Reset captions and the notice line.
 pub const TEXT_TINY: Pixels = px(11.);
-/// The weekday row under the spark bars.
+/// The "Menu bar shows" label and the notes under the login row.
 pub const TEXT_MICRO: Pixels = px(10.);
-/// The number on a stat tile.
-pub const TEXT_STAT: Pixels = px(15.);
 
-/// Monospace family, used for every number the popover prints.
+/// Line box of a 13px row. gpui does not lay text out to a round number, so
+/// every row states its line height and the height arithmetic uses these.
+pub const LINE_TITLE_PX: f32 = 17.0;
+pub const LINE_TITLE: Pixels = px(LINE_TITLE_PX);
+/// Line box of the 12px signed-out line.
+pub const LINE_SMALL_PX: f32 = 16.0;
+pub const LINE_SMALL: Pixels = px(LINE_SMALL_PX);
+/// Line box of an 11px caption.
+pub const LINE_TINY_PX: f32 = 14.0;
+pub const LINE_TINY: Pixels = px(LINE_TINY_PX);
+/// Line box of a 10px label.
+pub const LINE_MICRO_PX: f32 = 13.0;
+pub const LINE_MICRO: Pixels = px(LINE_MICRO_PX);
+
+/// Monospace family, used for the tabular numbers on the Today rows.
 pub const MONO_FAMILY: &str = "SF Mono";
 /// UI family.
 pub const UI_FAMILY: &str = ".SystemUIFont";
@@ -190,16 +225,11 @@ mod tests {
 
     #[test]
     fn light_background_is_the_mockup_material() {
-        assert_eq!((LIGHT.bg.r * 255.0).round() as u32, 240);
-        assert_eq!((LIGHT.bg.b * 255.0).round() as u32, 242);
+        assert_eq!((LIGHT.bg.r * 255.0).round() as u32, 246);
+        assert_eq!((DARK.bg.b * 255.0).round() as u32, 42);
+        // Opaque: see BG_ALPHA for why the mockup's 0.80 is not in use.
         assert!((LIGHT.bg.a - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn accent_is_system_blue() {
-        assert_eq!((LIGHT.accent.r * 255.0).round() as u32, 0x0a);
-        assert_eq!((LIGHT.accent.g * 255.0).round() as u32, 0x7a);
-        assert_eq!((LIGHT.accent.b * 255.0).round() as u32, 0xff);
+        assert!((DARK.bg.a - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -211,29 +241,32 @@ mod tests {
     }
 
     #[test]
-    fn popover_is_320_wide() {
-        assert_eq!(POPOVER_WIDTH, px(320.));
-        assert_eq!(POPOVER_RADIUS, px(11.));
+    fn the_popover_is_260_wide() {
+        assert_eq!(POPOVER_WIDTH, px(260.));
+        assert_eq!(POPOVER_RADIUS, px(10.));
+        assert_eq!(POPOVER_PAD, px(5.));
     }
 
     #[test]
-    fn rings_are_the_mockups_56_by_6() {
-        assert_eq!(RING_SIZE, px(56.));
-        assert_eq!(RING_STROKE, px(6.));
+    fn limit_bars_are_the_mockups_four_pixels() {
+        assert_eq!(LIMIT_BAR_HEIGHT, px(4.));
+        assert_eq!(SPARK_BAR_WIDTH, px(8.));
+        assert_eq!(SPARK_MAX_HEIGHT, px(16.));
+    }
+
+    /// Red is the only colour the popover ever draws, and only for a limit
+    /// that is nearly spent.
+    #[test]
+    fn a_limit_bar_is_ink_until_it_is_low() {
+        assert_eq!(LIGHT.limit_bar(false), LIGHT.text);
+        assert_eq!(LIGHT.limit_bar(true), LIGHT.warning);
+        assert_eq!(DARK.limit_bar(true), DARK.warning);
     }
 
     #[test]
-    fn the_model_bar_is_ink_not_accent() {
-        // The mockup's rgba(29,29,31,0.55) light, rgba(245,245,247,0.55) dark.
-        assert_eq!((LIGHT.model_bar.r * 255.0).round() as u32, 29);
-        assert_eq!((DARK.model_bar.r * 255.0).round() as u32, 245);
-        assert!((LIGHT.model_bar.a - 0.55).abs() < 1e-6);
-    }
-
-    #[test]
-    fn past_spark_bars_are_the_accent_faded() {
+    fn past_spark_bars_are_the_ink_faded() {
         let past = LIGHT.spark_past();
-        assert_eq!(past.r, LIGHT.accent.r);
-        assert!((past.a - 0.35).abs() < 1e-6);
+        assert_eq!(past.r, LIGHT.text.r);
+        assert!((past.a - 0.18).abs() < 1e-6);
     }
 }

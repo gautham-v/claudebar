@@ -1,10 +1,14 @@
-//! Root popover view: header, notice line, rings, the two local blocks, footer.
+//! Root popover view: the header, a block per limit, the two local blocks and
+//! the menu rows under them.
+//!
+//! It is shaped like a system menu — the Battery item's menu, which
+//! `docs/mockup-popover-v2.dc.html` copies: 260px wide, 5px of inset around
+//! plain rows, bold section headers, hairline separators, and nothing but ink
+//! on the material except a limit bar that has gone red.
 //!
 //! It owns the little state there is — the theme picked from the window's
-//! appearance and whether the "···" menu is open — plus the key bindings and
-//! the menu itself. [`rings`] and [`stats`] are pure render functions over the
-//! snapshot this view exposes, exactly as `docs/mockup-popover.dc.html` stacks
-//! them.
+//! appearance and whether the Settings row is expanded — plus the key bindings.
+//! [`stats`] renders the two blocks read out of the local session logs.
 //!
 //! Everything it knows about the account and the session logs arrives through
 //! [`UsageProvider`], so the whole view tree renders against
@@ -16,19 +20,19 @@ use std::rc::Rc;
 use chrono::{DateTime, Local};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    actions, div, px, App, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
+    actions, div, px, App, Context, Div, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Window,
 };
 
 use crate::launch_at_login;
-use crate::model::{DayStats, LimitKind, LocalStats};
+use crate::model::{DayStats, Limit, LimitKind, LocalStats};
 use crate::settings::{MenuBarLimit, Settings};
 use crate::ui::provider::{ProviderState, UsageProvider};
+use crate::ui::stats;
 use crate::ui::theme::{self, Theme};
-use crate::ui::{rings, stats};
 
-/// Where the "claude.ai" footer button and menu item go.
+/// Where the "Open claude.ai" row goes.
 pub const USAGE_URL: &str = "https://claude.ai/settings/usage";
 
 /// What the popover asks its window owner to do.
@@ -56,8 +60,9 @@ pub fn bind_keys(cx: &mut App) {
 pub struct Popover {
     focus: FocusHandle,
     provider: Rc<dyn UsageProvider>,
-    menu_open: bool,
-    /// The last "Launch at login" failure, shown under the menu row.
+    /// Whether the "Settings" disclosure row has its rows shown under it.
+    settings_open: bool,
+    /// The last "Launch at login" failure, shown under that row.
     login_error: Option<SharedString>,
     theme: Theme,
     appearance: Option<gpui::Subscription>,
@@ -75,7 +80,7 @@ impl Popover {
         Self {
             focus: cx.focus_handle(),
             provider,
-            menu_open: false,
+            settings_open: false,
             login_error: None,
             theme: Theme::default(),
             appearance: None,
@@ -92,7 +97,7 @@ impl Popover {
         &self.provider
     }
 
-    /// The clock the reset captions and the footer read.
+    /// The clock the reset subtitles read.
     pub fn now(&self) -> DateTime<Local> {
         Local::now()
     }
@@ -107,8 +112,9 @@ impl Popover {
         self.provider.local().and_then(|s| s.today().cloned())
     }
 
-    /// Whether there is no token to fetch limits with; the rings are replaced
-    /// by one line of instructions, and the local blocks carry on regardless.
+    /// Whether there is no token to fetch limits with; the limit blocks are
+    /// replaced by one line of instructions, and the local blocks carry on
+    /// regardless.
     pub fn signed_out(&self) -> bool {
         self.provider.state() == ProviderState::SignedOut
     }
@@ -117,7 +123,7 @@ impl Popover {
 
     /// Back to the default state; called every time the popover opens.
     pub fn reset(&mut self, cx: &mut Context<Self>) {
-        self.menu_open = false;
+        self.settings_open = false;
         self.login_error = None;
         self.reload(cx);
     }
@@ -131,35 +137,36 @@ impl Popover {
 
     /// Ask for a refetch and tell the owner, which also redraws the menu bar.
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.menu_open = false;
+        self.settings_open = false;
         self.provider.refresh();
         cx.emit(PopoverEvent::Refresh);
         self.reload(cx);
     }
 
-    /// Open the "···" menu without a click — the preview example's `menu` mode,
-    /// which cannot click.
-    pub fn open_menu(&mut self, cx: &mut Context<Self>) {
-        self.menu_open = true;
+    /// Expand the Settings section without a click — the preview example's
+    /// `settings` mode, which cannot click.
+    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = true;
         cx.notify();
     }
 
-    fn toggle_menu(&mut self, cx: &mut Context<Self>) {
-        self.menu_open = !self.menu_open;
+    fn toggle_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
         cx.notify();
     }
 
     fn open_usage_page(&mut self, cx: &mut Context<Self>) {
-        self.menu_open = false;
+        self.settings_open = false;
         cx.open_url(USAGE_URL);
     }
 
     // ── Actions ─────────────────────────────────────────────────────────────
 
     fn on_dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
-        // Esc collapses the menu first, so one press never does two things.
-        if self.menu_open {
-            self.menu_open = false;
+        // Esc collapses the Settings section first, so one press never does
+        // two things.
+        if self.settings_open {
+            self.settings_open = false;
             cx.notify();
         } else {
             cx.emit(PopoverEvent::Close);
@@ -170,210 +177,271 @@ impl Popover {
 
     /// Height the content wants; the window is resized to it.
     pub fn preferred_height(&self) -> Pixels {
-        let limits = if self.signed_out() {
-            SIGNED_OUT_HEIGHT
-        } else {
-            rings::height()
-        };
         let notice = if self.notice().is_some() {
             NOTICE_HEIGHT
         } else {
             0.0
         };
-        let content = HEADER_HEIGHT
+        px(POPOVER_PAD_TOTAL
+            + SECTION_HEADER_HEIGHT
             + notice
-            + limits
-            + RULE
-            + stats::today_height(self)
-            + RULE
+            + self.limits_height()
+            + SEPARATOR_HEIGHT
+            + stats::today_height()
+            + SEPARATOR_HEIGHT
             + stats::week_height()
-            + RULE
-            + FOOTER_HEIGHT;
-        // The popover clips its children, and the "···" menu is drawn over
-        // them rather than inside the flow, so a menu taller than what is under
-        // it would lose its last rows. Growing the window while the menu is
-        // open is cheaper than shrinking the rows: the extra height is only
-        // there for as long as the menu is.
-        let with_menu = if self.menu_open {
-            content.max(MENU_TOP + self.menu_height() + MENU_BOTTOM_MARGIN)
-        } else {
-            content
-        };
-        px(with_menu)
+            + SEPARATOR_HEIGHT
+            + self.menu_height())
     }
 
-    /// How tall the "···" menu is, from the rows it will draw. Kept as
-    /// arithmetic over the row constants rather than measured, because
-    /// `preferred_height` runs before the menu is laid out.
+    /// How tall the block under the header is: one block per limit, or the one
+    /// line that stands in for them when there is nothing to show.
+    fn limits_height(&self) -> f32 {
+        let limits = self.limits();
+        if limits.is_empty() {
+            return LIMITS_PAD_TOP + theme::LINE_SMALL_PX + LIMITS_PAD_BOTTOM;
+        }
+        let n = limits.len() as f32;
+        LIMITS_PAD_TOP
+            + n * LIMIT_BLOCK_HEIGHT
+            + (n - 1.0) * theme::LIMIT_BLOCK_GAP_PX
+            + LIMITS_PAD_BOTTOM
+    }
+
+    /// How tall the menu rows at the bottom are, from the rows they will draw.
+    /// Kept as arithmetic over the row constants rather than measured, because
+    /// `preferred_height` runs before the rows are laid out.
     fn menu_height(&self) -> f32 {
-        let rows = 1.0 // Refresh
-            + self.menu_bar_choices().len() as f32
-            + 1.0 // Show percentage
-            + 1.0 // Launch at login
-            + 1.0; // Quit Claudebar
+        // Refresh, Open claude.ai, Settings, Launch at login, then Quit under
+        // its own separator.
+        let rows = 5.0;
+        let settings = if self.settings_open {
+            SECTION_LABEL_HEIGHT + (self.menu_bar_choices().len() as f32 + 1.0) * ROW_HEIGHT
+        } else {
+            0.0
+        };
         let login_note = if launch_at_login::availability() != launch_at_login::Availability::Ready
         {
-            MENU_NOTE_HEIGHT
+            NOTE_HEIGHT
         } else {
             0.0
         };
         let login_error = if self.login_error.is_some() {
-            MENU_NOTE_HEIGHT
+            NOTE_HEIGHT
         } else {
             0.0
         };
-        MENU_PAD * 2.0
-            + rows * MENU_ROW_HEIGHT
-            + MENU_SECTION_HEIGHT
-            + MENU_RULE_HEIGHT
-            + login_note
-            + login_error
+        rows * ROW_HEIGHT + settings + SEPARATOR_HEIGHT + login_note + login_error
     }
 
     /// The muted line under the header, when there is something to say. A
-    /// healthy popover has nothing there: the rings already say it.
+    /// healthy popover has nothing there: the limit blocks already say it.
+    /// Signed out is not a notice — it replaces the blocks outright.
     fn notice(&self) -> Option<String> {
         match self.provider.state() {
             ProviderState::Error(message) => Some(message),
-            ProviderState::SignedOut => Some("Not signed in".into()),
-            ProviderState::Loading | ProviderState::Ready => None,
+            ProviderState::SignedOut | ProviderState::Loading | ProviderState::Ready => None,
         }
     }
 
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        let plan = self.provider.usage().and_then(|u| u.plan);
-
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .px(theme::PAD_X)
-            .pt(px(HEADER_PAD_TOP))
-            .pb(px(HEADER_PAD_BOTTOM))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_baseline()
-                    .gap(px(6.))
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_size(theme::TEXT_TITLE)
-                            .child("Claude"),
-                    )
-                    .when_some(plan, |el, plan| {
-                        el.child(
-                            div()
-                                .text_size(theme::TEXT_SMALL)
-                                .text_color(theme.secondary)
-                                .child(plan),
-                        )
-                    }),
-            )
-            .child(icon_button(
-                "more",
-                "···",
-                theme,
-                cx.listener(|this, _, _, cx| this.toggle_menu(cx)),
-            ))
+    /// The limits to draw, which is nothing at all until a fetch lands.
+    fn limits(&self) -> Vec<Limit> {
+        if self.signed_out() {
+            return Vec::new();
+        }
+        self.provider.usage().map(|u| u.limits).unwrap_or_default()
     }
 
     fn notice_line(&self) -> Option<impl IntoElement> {
         let theme = self.theme;
         self.notice().map(|line| {
             div()
+                .px(theme::ROW_PAD_X)
                 .h(px(NOTICE_HEIGHT))
-                .px(theme::PAD_X)
                 .text_size(theme::TEXT_TINY)
+                .line_height(theme::LINE_TINY)
                 .text_color(theme.secondary)
                 .child(line)
         })
     }
 
-    /// What stands in for the rings with no token: the one thing the user can
-    /// do about it.
-    fn signed_out_line(&self) -> impl IntoElement {
+    /// One limit: its name and percent on a row, a 4px bar, and when the
+    /// window resets under both.
+    fn limit_block(&self, limit: &Limit) -> impl IntoElement {
         let theme = self.theme;
+        let threshold = self.provider.settings().low_remaining_percent;
+        let percent = limit.percent_rounded();
+        let caption = limit.reset_sentence(self.now()).unwrap_or_default();
+
         div()
-            .h(px(SIGNED_OUT_HEIGHT))
             .flex()
+            .flex_col()
+            .gap(theme::LIMIT_GAP)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .text_size(theme::TEXT_BODY)
+                    .line_height(theme::LINE_TITLE)
+                    .child(div().child(limit.label().to_string()))
+                    .child(
+                        div()
+                            .text_color(theme.secondary)
+                            .child(format!("{percent}%")),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .h(theme::LIMIT_BAR_HEIGHT)
+                    .rounded(theme::LIMIT_BAR_RADIUS)
+                    .bg(theme.separator)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .w(gpui::relative(percent as f32 / 100.0))
+                            .h_full()
+                            .rounded(theme::LIMIT_BAR_RADIUS)
+                            .bg(theme.limit_bar(limit.is_low(threshold))),
+                    ),
+            )
+            .child(
+                div()
+                    .h(theme::LINE_TINY)
+                    .text_size(theme::TEXT_TINY)
+                    .line_height(theme::LINE_TINY)
+                    .text_color(theme.secondary)
+                    .child(caption),
+            )
+    }
+
+    /// The block under the header: one entry per limit, or the single line
+    /// that explains why there are none.
+    fn limits_block(&self) -> impl IntoElement {
+        let theme = self.theme;
+        let limits = self.limits();
+        let frame = div()
+            .flex()
+            .flex_col()
+            .gap(theme::LIMIT_BLOCK_GAP)
+            .px(theme::ROW_PAD_X)
+            .pt(px(LIMITS_PAD_TOP))
+            .pb(px(LIMITS_PAD_BOTTOM));
+
+        if limits.is_empty() {
+            let line = if self.signed_out() {
+                SIGNED_OUT_LINE
+            } else {
+                LOADING_LINE
+            };
+            return frame.child(
+                div()
+                    .h(theme::LINE_SMALL)
+                    .text_size(theme::TEXT_SMALL)
+                    .line_height(theme::LINE_SMALL)
+                    .text_color(theme.secondary)
+                    .child(line),
+            );
+        }
+        frame.children(
+            limits
+                .iter()
+                .map(|limit| self.limit_block(limit).into_any_element())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// A plain menu row: a label with a hover wash, like a menu item.
+    fn menu_row(
+        &self,
+        id: SharedString,
+        label: SharedString,
+        indented: bool,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> Div {
+        self.check_row(id, label, None, indented, true, cx, action)
+    }
+
+    /// A menu row, with an optional checkmark on the right. Every clickable
+    /// row in the popover goes through this so they all wash the same way.
+    #[allow(clippy::too_many_arguments)]
+    fn check_row(
+        &self,
+        id: SharedString,
+        label: SharedString,
+        checked: Option<bool>,
+        indented: bool,
+        enabled: bool,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> Div {
+        let theme = self.theme;
+        let row = row_frame()
+            .id(id)
+            .justify_between()
             .items_center()
-            .justify_center()
-            .px(theme::PAD_X)
-            .text_size(theme::TEXT_SMALL)
-            .text_color(theme.secondary)
-            .child("Sign in with `claude` in a terminal first")
+            .when(indented, |el| el.pl(theme::ROW_PAD_X + theme::ROW_INDENT))
+            .rounded(theme::ROW_RADIUS)
+            .text_size(theme::TEXT_BODY)
+            .line_height(theme::LINE_TITLE)
+            .text_color(if enabled { theme.text } else { theme.tertiary })
+            .when(enabled, |el| {
+                el.cursor_pointer()
+                    .hover(|s| s.bg(theme.hover))
+                    .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
+            })
+            .child(label)
+            .children(checked.map(|on| div().child(if on { "\u{2713}" } else { "" })));
+        // The rows live in a flex column, and gpui's `Stateful<Div>` is not a
+        // `Div`; wrapping keeps every child of the column the same type.
+        div().flex().flex_col().child(row)
+    }
+
+    /// A note under a row (no bundle, or a failed toggle).
+    fn note(&self, message: SharedString) -> impl IntoElement {
+        div()
+            .px(theme::ROW_PAD_X)
+            .pb(px(NOTE_PAD_BOTTOM))
+            .text_size(theme::TEXT_MICRO)
+            .line_height(theme::LINE_MICRO)
+            .text_color(self.theme.tertiary)
+            .child(message)
     }
 
     /// The "Launch at login" row: a checkmark that reflects `SMAppService`'s
     /// own status, so it agrees with System Settings rather than with a local
     /// copy of the state. Disabled outside a bundle, with the reason under it.
-    fn launch_at_login_item(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
+    fn launch_at_login_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let available = launch_at_login::availability() == launch_at_login::Availability::Ready;
-        let checked = launch_at_login::is_enabled();
-        let note = |message: SharedString| {
-            div()
-                .px(px(MENU_ROW_PAD_X))
-                .pb(px(4.))
-                .text_size(theme::TEXT_MICRO)
-                .line_height(px(13.))
-                .text_color(theme.tertiary)
-                .child(message)
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .id("menu-login")
-                    .px(px(MENU_ROW_PAD_X))
-                    .py(px(MENU_ROW_PAD_Y))
-                    .rounded(px(5.))
-                    .text_size(theme::TEXT_SMALL)
-                    .line_height(px(MENU_ROW_LINE))
-                    .text_color(if available {
-                        theme.text
-                    } else {
-                        theme.tertiary
-                    })
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .when(available, |el| {
-                        el.cursor_pointer()
-                            .hover(|s| s.bg(theme.hover))
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_launch_at_login(cx)))
-                    })
-                    .child("Launch at login")
-                    .child(if checked { "\u{2713}" } else { "" }),
-            )
-            .when(!available, |el| {
-                el.child(note(launch_at_login::NO_BUNDLE_NOTE.into()))
-            })
-            .when_some(self.login_error.clone(), |el, message| {
-                el.child(note(message))
-            })
+        self.check_row(
+            "row-login".into(),
+            "Launch at login".into(),
+            Some(launch_at_login::is_enabled()),
+            false,
+            available,
+            cx,
+            |this, cx| this.toggle_launch_at_login(cx),
+        )
+        .when(!available, |el| {
+            el.child(self.note(launch_at_login::NO_BUNDLE_NOTE.into()))
+        })
+        .when_some(self.login_error.clone(), |el, message| {
+            el.child(self.note(message))
+        })
     }
 
     /// Flip the login item, keeping whatever `SMAppService` complained about so
-    /// the menu can show it rather than failing silently.
+    /// the popover can show it rather than failing silently.
     fn toggle_launch_at_login(&mut self, cx: &mut Context<Self>) {
         let wanted = !launch_at_login::is_enabled();
         self.login_error = launch_at_login::set_enabled(wanted).err().map(Into::into);
-        if self.login_error.is_none() {
-            self.menu_open = false;
-        }
         cx.notify();
     }
 
     /// The rows the "Menu bar shows" section offers: one per limit the last
-    /// snapshot carried, in the order the rings are drawn. Before the first
+    /// snapshot carried, in the order the blocks are drawn. Before the first
     /// fetch lands there is nothing to enumerate, so the two windows every
     /// account has stand in — picking one of them is still meaningful.
     fn menu_bar_choices(&self) -> Vec<(MenuBarLimit, SharedString)> {
@@ -397,121 +465,25 @@ impl Popover {
             .collect()
     }
 
-    /// A menu row with a checkmark on the right, styled exactly like the
-    /// "Launch at login" row so the whole menu reads as one list.
-    fn check_item(
-        &self,
-        id: SharedString,
-        label: SharedString,
-        checked: bool,
-        cx: &mut Context<Self>,
-        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-    ) -> impl IntoElement {
-        let theme = self.theme;
-        div()
-            .id(id)
-            .px(px(MENU_ROW_PAD_X))
-            .py(px(MENU_ROW_PAD_Y))
-            .rounded(px(5.))
-            .text_size(theme::TEXT_SMALL)
-            .line_height(px(MENU_ROW_LINE))
-            .text_color(theme.text)
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .cursor_pointer()
-            .hover(|s| s.bg(theme.hover))
-            .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
-            .child(label)
-            .child(if checked { "\u{2713}" } else { "" })
-    }
-
-    /// A small label over a group of rows.
-    fn menu_section(&self, label: &'static str) -> impl IntoElement {
-        div()
-            .px(px(MENU_ROW_PAD_X))
-            .pt(px(MENU_SECTION_PAD_TOP))
-            .pb(px(MENU_SECTION_PAD_BOTTOM))
-            .text_size(theme::TEXT_MICRO)
-            .line_height(px(MENU_SECTION_LINE))
-            .text_color(self.theme.tertiary)
-            .child(label)
-    }
-
-    /// Point the menu bar item at another limit, persist it, and close.
-    fn choose_menu_bar_limit(&mut self, limit: MenuBarLimit, cx: &mut Context<Self>) {
-        self.update_settings(cx, |settings| settings.menu_bar = limit);
-    }
-
-    /// Turn the menu bar's number on or off, persist it, and close.
-    fn toggle_show_percent(&mut self, cx: &mut Context<Self>) {
-        self.update_settings(cx, |settings| {
-            settings.show_percent = !settings.show_percent
-        });
-    }
-
-    /// The one path a menu row takes to change a setting: read what the
-    /// provider holds, change the one field, hand it back. The provider
-    /// persists it and re-renders both the popover and the menu bar item, so
-    /// there is nothing to copy into this view.
-    fn update_settings(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut Settings)) {
-        let mut settings = self.provider.settings();
-        change(&mut settings);
-        self.provider.set_settings(settings);
-        self.menu_open = false;
-        cx.notify();
-    }
-
-    /// The "···" dropdown, drawn over the content.
-    fn menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
+    /// The rows the Settings disclosure shows in place: what the menu bar
+    /// tracks, and whether it prints the number.
+    fn settings_rows(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.provider.settings();
-        let item = |id: &'static str,
-                    label: &'static str,
-                    cx: &mut Context<Self>,
-                    action: fn(&mut Self, &mut Context<Self>)| {
-            div()
-                .id(id)
-                .px(px(MENU_ROW_PAD_X))
-                .py(px(MENU_ROW_PAD_Y))
-                .rounded(px(5.))
-                .text_size(theme::TEXT_SMALL)
-                .line_height(px(MENU_ROW_LINE))
-                .text_color(theme.text)
-                .cursor_pointer()
-                .hover(|s| s.bg(theme.hover))
-                .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
-                .child(label)
-        };
-
         div()
-            .absolute()
-            // Without this the content underneath gets the same click.
-            .occlude()
-            .top(px(MENU_TOP))
-            .right(theme::PAD_X)
-            .w(px(160.))
-            .p(px(MENU_PAD))
-            .rounded(px(8.))
-            .bg(theme.menu_bg)
-            .border_1()
-            .border_color(theme.border)
             .flex()
             .flex_col()
-            .child(item("menu-refresh", "Refresh", cx, |this, cx| {
-                this.refresh(cx)
-            }))
-            .child(self.menu_section(MENU_BAR_SECTION))
+            .child(section_label(self.theme, MENU_BAR_SECTION))
             .children(
                 self.menu_bar_choices()
                     .into_iter()
                     .map(|(choice, label)| {
                         let checked = choice == settings.menu_bar;
-                        self.check_item(
-                            SharedString::from(format!("menu-limit-{}", choice.as_config_str())),
+                        self.check_row(
+                            SharedString::from(format!("row-limit-{}", choice.as_config_str())),
                             label,
-                            checked,
+                            Some(checked),
+                            true,
+                            true,
                             cx,
                             move |this, cx| this.choose_menu_bar_limit(choice.clone(), cx),
                         )
@@ -519,130 +491,164 @@ impl Popover {
                     })
                     .collect::<Vec<_>>(),
             )
-            .child(self.check_item(
-                "menu-show-percent".into(),
+            .child(self.check_row(
+                "row-show-percent".into(),
                 "Show percentage".into(),
-                settings.show_percent,
+                Some(settings.show_percent),
+                true,
+                true,
                 cx,
                 |this, cx| this.toggle_show_percent(cx),
             ))
-            .child(self.launch_at_login_item(cx))
-            .child(div().h(px(RULE)).my(px(MENU_PAD)).bg(theme.separator))
-            .child(item("menu-quit", "Quit Claudebar", cx, |this, cx| {
-                this.menu_open = false;
-                cx.quit();
-            }))
     }
 
-    fn rule(&self) -> impl IntoElement {
-        div().h(px(RULE)).mx(theme::PAD_X).bg(self.theme.separator)
+    /// Point the menu bar item at another limit, persist it, and collapse.
+    fn choose_menu_bar_limit(&mut self, limit: MenuBarLimit, cx: &mut Context<Self>) {
+        self.update_settings(cx, |settings| settings.menu_bar = limit);
     }
 
-    fn footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        let text_button = |id: &'static str,
-                           label: &'static str,
-                           cx: &mut Context<Self>,
-                           action: fn(&mut Self, &mut Context<Self>)| {
-            div()
-                .id(id)
-                .cursor_pointer()
-                .text_color(theme.accent)
-                .hover(|s| s.text_color(theme.text))
-                .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
-                .child(label)
-        };
+    /// Turn the menu bar's number on or off, persist it, and collapse.
+    fn toggle_show_percent(&mut self, cx: &mut Context<Self>) {
+        self.update_settings(cx, |settings| {
+            settings.show_percent = !settings.show_percent
+        });
+    }
 
-        let left = match self.provider.updated_at() {
-            Some(at) => format!("Updated {}", at.format("%-I:%M %p")),
-            None => "Not updated yet".to_string(),
-        };
+    /// The one path a settings row takes to change a setting: read what the
+    /// provider holds, change the one field, hand it back. The provider
+    /// persists it and re-renders both the popover and the menu bar item, so
+    /// there is nothing to copy into this view.
+    fn update_settings(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut Settings)) {
+        let mut settings = self.provider.settings();
+        change(&mut settings);
+        self.provider.set_settings(settings);
+        self.settings_open = false;
+        cx.notify();
+    }
 
+    /// The rows under the last separator: the actions, the Settings
+    /// disclosure, and Quit under a separator of its own.
+    fn menu_rows(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .px(theme::PAD_X)
-            .pt(px(FOOTER_PAD_TOP))
-            .pb(px(FOOTER_PAD_BOTTOM))
-            .text_size(theme::TEXT_TINY)
-            .text_color(theme.tertiary)
-            .child(div().child(left))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(12.))
-                    .child(text_button("footer-refresh", "Refresh", cx, |this, cx| {
-                        this.refresh(cx)
-                    }))
-                    .child(text_button("footer-web", "claude.ai", cx, |this, cx| {
-                        this.open_usage_page(cx)
-                    })),
-            )
+            .flex_col()
+            .child(self.menu_row(
+                "row-refresh".into(),
+                "Refresh".into(),
+                false,
+                cx,
+                |this, cx| this.refresh(cx),
+            ))
+            .child(self.menu_row(
+                "row-web".into(),
+                "Open claude.ai".into(),
+                false,
+                cx,
+                |this, cx| this.open_usage_page(cx),
+            ))
+            .child(self.menu_row(
+                "row-settings".into(),
+                "Settings".into(),
+                false,
+                cx,
+                |this, cx| this.toggle_settings(cx),
+            ))
+            .children(self.settings_open.then(|| self.settings_rows(cx)))
+            .child(self.launch_at_login_row(cx))
+            .child(separator(self.theme))
+            .child(self.menu_row(
+                "row-quit".into(),
+                "Quit Claudebar".into(),
+                false,
+                cx,
+                |_, cx| cx.quit(),
+            ))
     }
 }
 
-/// A 22px square glyph button: the "···" menu.
-fn icon_button(
-    id: &'static str,
-    glyph: &'static str,
-    theme: Theme,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+// ── Shared row shapes, which `stats` draws with too ───────────────────────────
+
+/// The frame every row in the popover shares: the menu's text inset and a
+/// couple of pixels of air above and below.
+pub fn row_frame() -> Div {
     div()
-        .id(id)
         .flex()
-        .items_center()
-        .justify_center()
-        .size(theme::ICON_BUTTON)
-        .flex_shrink_0()
-        .rounded(px(5.))
-        .text_size(theme::TEXT_BODY)
-        .text_color(theme.secondary)
-        .cursor_pointer()
-        .hover(|s| s.bg(theme.hover).text_color(theme.text))
-        .on_click(on_click)
-        .child(glyph)
+        .flex_row()
+        .px(theme::ROW_PAD_X)
+        .py(theme::ROW_PAD_Y)
 }
 
-// ── Layout constants (see `docs/mockup-popover.dc.html`) ─────────────────────
+/// A bold section header ("Claude Usage", "Today"). It takes no colour: the
+/// header is primary text, which the root already sets.
+pub fn section_header(label: &'static str) -> impl IntoElement {
+    div()
+        .px(theme::ROW_PAD_X)
+        .pt(px(SECTION_HEADER_PAD_TOP))
+        .pb(px(SECTION_HEADER_PAD_BOTTOM))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_size(theme::TEXT_TITLE)
+        .line_height(theme::LINE_TITLE)
+        .child(label)
+}
 
-/// The mockup's `12px 14px 4px` header padding around a 22px button row.
-const HEADER_PAD_TOP: f32 = 12.0;
-const HEADER_PAD_BOTTOM: f32 = 4.0;
-pub const HEADER_HEIGHT: f32 = HEADER_PAD_TOP + 22.0 + HEADER_PAD_BOTTOM;
+/// The small tertiary label over a group of settings rows.
+fn section_label(theme: Theme, label: &'static str) -> impl IntoElement {
+    div()
+        .px(theme::ROW_PAD_X + theme::ROW_INDENT)
+        .pt(px(SECTION_LABEL_PAD_TOP))
+        .pb(px(SECTION_LABEL_PAD_BOTTOM))
+        .text_size(theme::TEXT_MICRO)
+        .line_height(theme::LINE_MICRO)
+        .text_color(theme.tertiary)
+        .child(label)
+}
+
+/// A menu separator: a hairline inset from both edges with air around it.
+fn separator(theme: Theme) -> Div {
+    div()
+        .h(theme::HAIRLINE)
+        .mx(theme::SEPARATOR_INSET)
+        .my(theme::SEPARATOR_MARGIN)
+        .bg(theme.separator)
+}
+
+// ── Layout constants (see `docs/mockup-popover-v2.dc.html`) ──────────────────
+
+/// The mockup's `4px 10px 2px` header padding around a 13px line.
+const SECTION_HEADER_PAD_TOP: f32 = 4.0;
+const SECTION_HEADER_PAD_BOTTOM: f32 = 2.0;
+pub const SECTION_HEADER_HEIGHT: f32 =
+    SECTION_HEADER_PAD_TOP + theme::LINE_TITLE_PX + SECTION_HEADER_PAD_BOTTOM;
+/// One row: the mockup's 3px of vertical padding around a 13px line.
+pub const ROW_HEIGHT: f32 = theme::ROW_PAD_Y_PX * 2.0 + theme::LINE_TITLE_PX;
+/// A separator and the air above and below it.
+pub const SEPARATOR_HEIGHT: f32 = theme::HAIRLINE_PX + theme::SEPARATOR_MARGIN_PX * 2.0;
+/// The popover's own inset, top and bottom.
+const POPOVER_PAD_TOTAL: f32 = theme::POPOVER_PAD_PX * 2.0;
+/// The mockup's `2px 10px 6px` around the limit blocks.
+const LIMITS_PAD_TOP: f32 = 2.0;
+const LIMITS_PAD_BOTTOM: f32 = 6.0;
+/// One limit: the label row, the bar and the reset subtitle, 4px apart.
+const LIMIT_BLOCK_HEIGHT: f32 = theme::LINE_TITLE_PX
+    + theme::LIMIT_GAP_PX
+    + theme::LIMIT_BAR_HEIGHT_PX
+    + theme::LIMIT_GAP_PX
+    + theme::LINE_TINY_PX;
 /// The muted status line under the header.
-pub const NOTICE_HEIGHT: f32 = 18.0;
-/// The line that replaces the rings with no token.
-pub const SIGNED_OUT_HEIGHT: f32 = 10.0 + 19.0 + 14.0;
-/// A hairline separator.
-pub const RULE: f32 = 1.0;
-/// The label over the limit rows in the "···" menu.
+pub const NOTICE_HEIGHT: f32 = theme::LINE_TINY_PX;
+/// The label over the limit rows in the Settings section.
 const MENU_BAR_SECTION: &str = "Menu bar shows";
-/// One menu row: the mockup's 10/5 padding around a 17px line.
-const MENU_ROW_PAD_X: f32 = 10.0;
-const MENU_ROW_PAD_Y: f32 = 5.0;
-const MENU_ROW_LINE: f32 = 17.0;
-const MENU_ROW_HEIGHT: f32 = MENU_ROW_PAD_Y * 2.0 + MENU_ROW_LINE;
-/// The section label over the limit rows.
-const MENU_SECTION_PAD_TOP: f32 = 6.0;
-const MENU_SECTION_PAD_BOTTOM: f32 = 2.0;
-const MENU_SECTION_LINE: f32 = 13.0;
-const MENU_SECTION_HEIGHT: f32 = MENU_SECTION_PAD_TOP + MENU_SECTION_LINE + MENU_SECTION_PAD_BOTTOM;
-/// The menu's own padding, and the rule above Quit with its margins.
-const MENU_PAD: f32 = 4.0;
-const MENU_RULE_HEIGHT: f32 = RULE + 8.0;
-/// A note under the login row (no bundle, or a failed toggle).
-const MENU_NOTE_HEIGHT: f32 = 13.0 + 4.0;
-/// Where the menu hangs from, and the room left under it.
-const MENU_TOP: f32 = HEADER_HEIGHT - 2.0;
-const MENU_BOTTOM_MARGIN: f32 = 8.0;
-/// The mockup's `8px 14px 9px` footer padding around an 11px line.
-const FOOTER_PAD_TOP: f32 = 8.0;
-const FOOTER_PAD_BOTTOM: f32 = 9.0;
-pub const FOOTER_HEIGHT: f32 = FOOTER_PAD_TOP + 18.0 + FOOTER_PAD_BOTTOM;
+const SECTION_LABEL_PAD_TOP: f32 = 6.0;
+const SECTION_LABEL_PAD_BOTTOM: f32 = 2.0;
+const SECTION_LABEL_HEIGHT: f32 =
+    SECTION_LABEL_PAD_TOP + theme::LINE_MICRO_PX + SECTION_LABEL_PAD_BOTTOM;
+/// A note under a row (no bundle, or a failed toggle).
+const NOTE_PAD_BOTTOM: f32 = 4.0;
+const NOTE_HEIGHT: f32 = theme::LINE_MICRO_PX + NOTE_PAD_BOTTOM;
+/// What stands in for the limit blocks with no token, and while the first
+/// fetch is still out.
+const SIGNED_OUT_LINE: &str = "Sign in with `claude` in a terminal first";
+const LOADING_LINE: &str = "Checking your limits…";
 
 impl EventEmitter<PopoverEvent> for Popover {}
 
@@ -666,41 +672,19 @@ impl Render for Popover {
         self.theme = Theme::for_appearance(window.appearance());
         let theme = self.theme;
 
-        let header = self.header(cx);
-        let notice = self.notice_line();
-        let limits: gpui::AnyElement = if self.signed_out() {
-            self.signed_out_line().into_any_element()
-        } else {
-            rings::render(self, cx).into_any_element()
-        };
         let today = stats::today(self, cx);
         let week = stats::week(self, cx);
-        let footer = self.footer(cx);
-        // A transparent backdrop so a click anywhere dismisses the menu instead
-        // of falling through to a button.
-        let backdrop = self.menu_open.then(|| {
-            div()
-                .id("menu-backdrop")
-                .absolute()
-                .inset_0()
-                .occlude()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.menu_open = false;
-                    cx.notify();
-                }))
-        });
-        let menu = self.menu_open.then(|| self.menu(cx));
 
         div()
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
             .on_action(cx.listener(Self::on_dismiss))
-            .relative()
             .flex()
             .flex_col()
             .w(theme::POPOVER_WIDTH)
             .h_full()
+            .p(theme::POPOVER_PAD)
             .bg(theme.bg)
             .rounded(theme::POPOVER_RADIUS)
             .border_1()
@@ -709,17 +693,15 @@ impl Render for Popover {
             .font_family(theme::UI_FAMILY)
             .text_size(theme::TEXT_BODY)
             .text_color(theme.text)
-            .child(header)
-            .children(notice)
-            .child(limits)
-            .child(self.rule())
+            .child(section_header("Claude Usage"))
+            .children(self.notice_line())
+            .child(self.limits_block())
+            .child(separator(theme))
             .child(today)
-            .child(self.rule())
+            .child(separator(theme))
             .child(week)
-            .child(self.rule())
-            .child(footer)
-            .children(backdrop)
-            .children(menu)
+            .child(separator(theme))
+            .child(self.menu_rows(cx))
     }
 }
 
@@ -729,45 +711,66 @@ mod tests {
 
     /// The heights the window is sized from, exercised without a gpui window:
     /// they are plain arithmetic over the section constants.
-    fn total(limits: f32, notice: f32, today: f32) -> f32 {
-        HEADER_HEIGHT
+    fn total(limits: f32, notice: f32, menu: f32) -> f32 {
+        POPOVER_PAD_TOTAL
+            + SECTION_HEADER_HEIGHT
             + notice
             + limits
-            + RULE
-            + today
-            + RULE
+            + SEPARATOR_HEIGHT
+            + stats::today_height()
+            + SEPARATOR_HEIGHT
             + stats::week_height()
-            + RULE
-            + FOOTER_HEIGHT
+            + SEPARATOR_HEIGHT
+            + menu
+    }
+
+    /// Three limits, no notice, the menu collapsed and in a bundle.
+    fn three_limits() -> f32 {
+        LIMITS_PAD_TOP
+            + 3.0 * LIMIT_BLOCK_HEIGHT
+            + 2.0 * theme::LIMIT_BLOCK_GAP_PX
+            + LIMITS_PAD_BOTTOM
+    }
+
+    fn collapsed_menu() -> f32 {
+        5.0 * ROW_HEIGHT + SEPARATOR_HEIGHT
+    }
+
+    #[test]
+    fn the_rows_are_the_mockups_row() {
+        assert_eq!(ROW_HEIGHT, 23.0);
+        assert_eq!(SECTION_HEADER_HEIGHT, 23.0);
+        // A 1px rule with 5px of margin either side.
+        assert_eq!(SEPARATOR_HEIGHT, 11.0);
+    }
+
+    #[test]
+    fn a_limit_block_is_its_row_bar_and_subtitle() {
+        // 17 + 4 + 4 + 4 + 14.
+        assert_eq!(LIMIT_BLOCK_HEIGHT, 43.0);
+        assert_eq!(three_limits(), 2.0 + 129.0 + 16.0 + 6.0);
     }
 
     #[test]
     fn the_ready_popover_is_the_mockups_height() {
-        // Header 38, rings 129, Today with two model rows 171, week 99,
-        // footer 35, three rules.
-        assert_eq!(total(rings::height(), 0.0, 171.0), 475.0);
+        // 10 padding, 23 header, 153 limits, 92 Today, 23 week, 3 separators,
+        // 126 of menu rows.
+        assert_eq!(total(three_limits(), 0.0, collapsed_menu()), 460.0);
     }
 
+    /// The notice line and the expanded Settings section both add height, and
+    /// the signed-out line takes far less than three limit blocks.
     #[test]
-    fn a_notice_and_the_signed_out_line_change_the_total() {
-        let ready = total(rings::height(), 0.0, 171.0);
-        assert_eq!(total(rings::height(), NOTICE_HEIGHT, 171.0) - ready, 18.0);
-        assert!(total(SIGNED_OUT_HEIGHT, NOTICE_HEIGHT, 171.0) < ready);
-    }
-
-    /// The menu hangs off the header and the popover clips its children, so the
-    /// window has to be at least as tall as the menu while it is open.
-    #[test]
-    fn an_open_menu_never_reaches_past_the_popover() {
-        // The tallest menu: three limits plus a note under the login row.
-        let rows = 3.0 + 4.0;
-        let menu = MENU_PAD * 2.0
-            + rows * MENU_ROW_HEIGHT
-            + MENU_SECTION_HEIGHT
-            + MENU_RULE_HEIGHT
-            + MENU_NOTE_HEIGHT;
-        let ready = total(rings::height(), 0.0, 171.0);
-        assert!(MENU_TOP + menu + MENU_BOTTOM_MARGIN < ready);
+    fn the_states_change_the_total() {
+        let ready = total(three_limits(), 0.0, collapsed_menu());
+        assert_eq!(
+            total(three_limits(), NOTICE_HEIGHT, collapsed_menu()) - ready,
+            theme::LINE_TINY_PX
+        );
+        let signed_out = LIMITS_PAD_TOP + theme::LINE_SMALL_PX + LIMITS_PAD_BOTTOM;
+        assert!(total(signed_out, 0.0, collapsed_menu()) < ready);
+        let expanded = collapsed_menu() + SECTION_LABEL_HEIGHT + 4.0 * ROW_HEIGHT;
+        assert!(total(three_limits(), 0.0, expanded) > ready);
     }
 
     #[test]

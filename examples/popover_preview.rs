@@ -5,12 +5,12 @@
 //! token and without waiting for a fetch:
 //!
 //! ```text
-//! cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|menu
+//! cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|settings
 //! ```
 //!
-//! `menu` is `ready` with the "···" menu already open: the preview window takes
-//! no clicks, so the only way to see (and screenshot) the menu is to start with
-//! it down.
+//! `settings` is `ready` with the Settings section already expanded: the
+//! preview window takes no clicks, so the only way to see (and screenshot) it
+//! open is to start it that way.
 
 use std::rc::Rc;
 
@@ -46,14 +46,14 @@ impl Render for Preview {
 
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "ready".into());
-    let menu_open = mode == "menu";
+    let settings_open = mode == "settings";
 
     Application::new().run(move |cx: &mut App| {
         popover::bind_keys(cx);
 
         let bounds = Bounds {
             origin: point(px(120.), px(120.)),
-            size: size(px(368.), px(760.)),
+            size: size(px(308.), px(700.)),
         };
 
         cx.open_window(
@@ -75,8 +75,8 @@ fn main() {
                         _ => StubProvider::new(),
                     });
                     let mut popover = Popover::with_provider(provider, cx);
-                    if menu_open {
-                        popover.open_menu(cx);
+                    if settings_open {
+                        popover.open_settings(cx);
                     }
                     popover
                 });

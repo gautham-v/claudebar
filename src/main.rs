@@ -215,6 +215,9 @@ fn open_popover(
             is_movable: false,
             is_resizable: false,
             is_minimizable: false,
+            // Transparent lets the popover's own rounded, opaque background
+            // be the whole surface. `Blurred` plus a translucent
+            // `theme::BG_ALPHA` is the vibrant alternative — see that const.
             window_background: WindowBackgroundAppearance::Transparent,
             window_min_size: None,
             display_id: None,
