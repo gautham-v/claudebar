@@ -215,9 +215,9 @@ fn open_popover(
             is_movable: false,
             is_resizable: false,
             is_minimizable: false,
-            // Transparent lets the popover's own rounded, opaque background
-            // be the whole surface. `Blurred` plus a translucent
-            // Blurred plus a translucent `theme::BG_ALPHA` is the system-menu look.
+            // Blurred, with the popover painting a translucent background
+            // (`theme::BG_ALPHA`) over it, is what gives the system-menu look:
+            // whatever is behind the panel shows through as a soft wash.
             window_background: WindowBackgroundAppearance::Blurred,
             window_min_size: None,
             display_id: None,
