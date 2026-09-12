@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A macOS menu bar app that shows your Claude usage limits"
 license = "MIT"
-repository = "https://github.com/gauthamv/claudebar"
+repository = "https://github.com/gautham-v/claudebar"
 
 [dependencies]
 gpui = "0.2.2"
