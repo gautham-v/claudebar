@@ -12,7 +12,6 @@ let inset: CGFloat = 100
 let bodyR: CGFloat = 185
 
 let ink = NSColor(srgbRed: 0.12, green: 0.12, blue: 0.11, alpha: 1)
-let accent = NSColor(srgbRed: 0.77, green: 0.33, blue: 0.23, alpha: 1)
 
 func rounded(_ r: NSRect, _ rad: CGFloat) -> NSBezierPath {
     NSBezierPath(roundedRect: r, xRadius: rad, yRadius: rad)
@@ -40,26 +39,32 @@ func render(_ draw: (NSRect) -> Void) -> NSBitmapImageRep {
     return rep
 }
 
-func mailbar(_ body: NSRect) {
-    let w: CGFloat = 520, h: CGFloat = 386, stroke: CGFloat = 34
-    let f = NSRect(x: body.midX - w/2 - 26, y: body.midY - h/2 - 22, width: w, height: h)
+// The same ring the menu bar draws, at 1024pt: a faint full-circle track and an
+// arc from 12 o'clock clockwise, here parked at a representative utilisation so
+// the icon reads as "usage" at a glance rather than as an empty or full ring.
+func ring(_ body: NSRect) {
+    let stroke: CGFloat = 78
+    let radius: CGFloat = 250
+    let percent: CGFloat = 0.65
+    let c = NSPoint(x: body.midX, y: body.midY)
+
+    let track = NSBezierPath()
+    track.appendArc(withCenter: c, radius: radius, startAngle: 0, endAngle: 360)
+    track.lineWidth = stroke
+    ink.withAlphaComponent(0.30).setStroke()
+    track.stroke()
+
+    // AppKit angles are degrees anticlockwise from 3 o'clock, so 12 o'clock is
+    // 90 and a clockwise sweep counts down from there.
+    let arc = NSBezierPath()
+    arc.appendArc(withCenter: c, radius: radius, startAngle: 90,
+                  endAngle: 90 - 360 * percent, clockwise: true)
+    arc.lineWidth = stroke
+    arc.lineCapStyle = .round
     ink.setStroke()
-    let e = f.insetBy(dx: stroke/2, dy: stroke/2)
-    let p = rounded(e, 54); p.lineWidth = stroke; p.lineJoinStyle = .round; p.stroke()
-    let flapInset: CGFloat = 40
-    let depth = e.height * 0.52
-    let v = NSBezierPath()
-    v.move(to: NSPoint(x: e.minX + flapInset, y: e.maxY))
-    v.line(to: NSPoint(x: e.midX, y: e.maxY - depth))
-    v.line(to: NSPoint(x: e.maxX - flapInset, y: e.maxY))
-    v.lineWidth = stroke; v.lineJoinStyle = .round; v.lineCapStyle = .round; v.stroke()
-    // the unread dot, clear of the envelope's top-right corner
-    let rr: CGFloat = 54
-    let c = NSPoint(x: e.maxX + 52, y: e.maxY + 52)
-    accent.setFill()
-    NSBezierPath(ovalIn: NSRect(x: c.x-rr, y: c.y-rr, width: 2*rr, height: 2*rr)).fill()
+    arc.stroke()
 }
 
 let out = CommandLine.arguments[1]
-let rep = render(mailbar)
+let rep = render(ring)
 try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))

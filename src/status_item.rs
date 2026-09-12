@@ -12,26 +12,69 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSControl, NSEvent,
-    NSEventMask, NSFont, NSScreen, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSColor, NSControl, NSEvent,
+    NSEventMask, NSFont, NSForegroundColorAttributeName, NSScreen, NSStatusBar, NSStatusBarButton,
+    NSStatusItem, NSVariableStatusItemLength,
 };
-use objc2_foundation::{NSPoint, NSRect, NSString};
+use objc2_foundation::{NSAttributedString, NSDictionary, NSPoint, NSRect, NSString};
 
 use crate::menu_bar_icon;
 
-/// The gap between the envelope and the count. AppKit only exposes image
+/// The gap between the percentage and the ring. AppKit only exposes image
 /// padding on the button from macOS 14, and `objc2` 0.3 does not bind it, so
-/// the spacing is a leading space in the title instead — a space in the menu
-/// bar font is about the 4pt this wants.
+/// the spacing is a trailing space in the title instead — a space in the menu
+/// bar font is about the 4pt this wants. It trails rather than leads because
+/// the number comes first and the ring after it, the way the battery item sits.
 const IMAGE_TITLE_GAP: &str = " ";
 
-/// The menu bar title as AppKit is given it: the count with its leading gap, or
-/// nothing at all when there is no count.
+/// The menu bar title as AppKit is given it: the percentage with its trailing
+/// gap, or nothing at all when there is no percentage to show.
 fn spaced_title(title: &str) -> String {
     if title.is_empty() {
         String::new()
     } else {
-        format!("{IMAGE_TITLE_GAP}{title}")
+        format!("{title}{IMAGE_TITLE_GAP}")
+    }
+}
+
+/// What the menu bar item is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuBarState {
+    /// Loading, signed out, or otherwise nothing to report: an empty ring, no
+    /// number, and AppKit's own disabled rendering.
+    Idle,
+    /// A session utilisation. `low` is [`crate::model::Limit::is_low`], which
+    /// turns both the number and the ring red.
+    Usage { percent: u32, low: bool },
+}
+
+impl MenuBarState {
+    /// The number beside the ring. Whole percent, as the spec asks; empty while
+    /// idle so the ring stands alone.
+    fn title(self) -> String {
+        match self {
+            MenuBarState::Idle => String::new(),
+            MenuBarState::Usage { percent, .. } => format!("{percent}%"),
+        }
+    }
+
+    /// The percentage the ring is drawn for.
+    fn ring_percent(self) -> f32 {
+        match self {
+            MenuBarState::Idle => 0.0,
+            MenuBarState::Usage { percent, .. } => percent as f32,
+        }
+    }
+
+    /// Whether this state is the red, nearly-out one.
+    fn low(self) -> bool {
+        matches!(self, MenuBarState::Usage { low: true, .. })
+    }
+
+    /// Idle states are faded, the way the system items fade when they have
+    /// nothing to say.
+    fn dimmed(self) -> bool {
+        matches!(self, MenuBarState::Idle)
     }
 }
 
@@ -101,11 +144,15 @@ pub struct StatusItem {
 impl StatusItem {
     /// Install the menu bar item. Returns it plus the click channel.
     ///
-    /// The item is an envelope template image with `title` to its right, in the
-    /// menu bar's own font. Claudebar passes the unread count, or an empty string
-    /// when the count is zero — the envelope alone is then the whole item, and
-    /// it stays clickable because the image has a hit area of its own.
-    pub fn new(mtm: MainThreadMarker, title: &str) -> (Self, UnboundedReceiver<StatusItemEvent>) {
+    /// The item is the session percentage followed by the ring image, in the
+    /// menu bar's own font, so it sits like the battery item. Callers pass the
+    /// state they have; [`MenuBarState::Idle`] leaves the ring alone with no
+    /// number, and it stays clickable because the image has a hit area of its
+    /// own.
+    pub fn new(
+        mtm: MainThreadMarker,
+        state: MenuBarState,
+    ) -> (Self, UnboundedReceiver<StatusItemEvent>) {
         let (tx, rx) = mpsc::unbounded();
         let tx_outside = tx.clone();
         let target = StatusItemTarget::new(tx);
@@ -115,11 +162,9 @@ impl StatusItem {
 
         if let Some(button) = item.button(mtm) {
             unsafe {
-                button.setTitle(&NSString::from_str(&spaced_title(title)));
-                button.setImage(Some(&menu_bar_icon::envelope_image()));
-                // Envelope left, count right; `imageHugsTitle` keeps them as a
+                // Number left, ring right; `imageHugsTitle` keeps them as a
                 // pair instead of pushing the image to the button's far edge.
-                button.setImagePosition(NSCellImagePosition::ImageLeading);
+                button.setImagePosition(NSCellImagePosition::ImageTrailing);
                 button.setImageHugsTitle(true);
                 // The menu bar's own text metric, so the number matches the
                 // system items next to it rather than the default control font.
@@ -130,6 +175,7 @@ impl StatusItem {
                 control.setTarget(Some(&*target));
                 control.setAction(Some(sel!(claudebarStatusItemClicked:)));
             }
+            apply_state(&button, state);
         }
 
         let outside_monitor = install_outside_click_monitor(tx_outside);
@@ -144,20 +190,12 @@ impl StatusItem {
         )
     }
 
-    /// Update the menu bar title (call when the unread count changes). An
-    /// empty string leaves the envelope on its own, with no count beside it.
-    pub fn set_title(&self, mtm: MainThreadMarker, title: &str) {
+    /// Redraw the item for a new state. Call this whenever a fetch lands: the
+    /// ring is a bitmap for one particular percentage, so it is rebuilt rather
+    /// than mutated.
+    pub fn set_state(&self, mtm: MainThreadMarker, state: MenuBarState) {
         if let Some(button) = self.item.button(mtm) {
-            button.setTitle(&NSString::from_str(&spaced_title(title)));
-        }
-    }
-
-    /// Fade the envelope, for signed-out and offline. AppKit's own disabled
-    /// rendering is what the system items use for the same state, so the alpha
-    /// tracks the menu bar appearance rather than being hard-coded.
-    pub fn set_dimmed(&self, mtm: MainThreadMarker, dimmed: bool) {
-        if let Some(button) = self.item.button(mtm) {
-            button.setAppearsDisabled(dimmed);
+            apply_state(&button, state);
         }
     }
 
@@ -179,6 +217,44 @@ impl StatusItem {
             width: frame.size.width as f32,
             height: frame.size.height as f32,
         })
+    }
+}
+
+/// Push a state onto the button: the number, the ring, and the fade.
+///
+/// The low state is the only one that needs an attributed title — AppKit has no
+/// plain "title colour" on a status item button, so the red number is a
+/// `NSForegroundColorAttributeName` run. Setting a plain title afterwards is
+/// what clears it again; the two titles are separate properties and the
+/// attributed one wins whenever it is set.
+fn apply_state(button: &NSStatusBarButton, state: MenuBarState) {
+    let title = spaced_title(&state.title());
+    if state.low() {
+        button.setAttributedTitle(&red_title(&title));
+    } else {
+        button.setAttributedTitle(&NSAttributedString::new());
+        button.setTitle(&NSString::from_str(&title));
+    }
+    button.setImage(Some(&menu_bar_icon::ring_image(
+        state.ring_percent(),
+        state.low(),
+    )));
+    button.setAppearsDisabled(state.dimmed());
+}
+
+/// The title drawn in the system red, matching the ring in the low state. The
+/// colour comes from `NSColor` rather than a literal so it tracks the menu bar
+/// appearance and the user's accessibility settings.
+fn red_title(title: &str) -> Retained<NSAttributedString> {
+    let red = NSColor::systemRedColor();
+    // Safety: `NSForegroundColorAttributeName` documents its value as an
+    // `NSColor`, which is what we pass.
+    unsafe {
+        let attrs = NSDictionary::from_slices(
+            &[NSForegroundColorAttributeName],
+            &[&*red as &objc2::runtime::AnyObject],
+        );
+        NSAttributedString::new_with_attributes(&NSString::from_str(title), &attrs)
     }
 }
 
@@ -235,12 +311,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_count_is_spaced_off_the_envelope() {
-        assert_eq!(spaced_title("3"), " 3");
+    fn a_percentage_is_spaced_off_the_ring_that_follows_it() {
+        assert_eq!(spaced_title("2%"), "2% ");
     }
 
     #[test]
-    fn no_count_means_no_title_at_all_not_a_stray_space() {
+    fn no_percentage_means_no_title_at_all_not_a_stray_space() {
         assert_eq!(spaced_title(""), "");
+    }
+
+    #[test]
+    fn the_idle_state_is_a_dimmed_empty_ring_with_no_number() {
+        let idle = MenuBarState::Idle;
+        assert_eq!(idle.title(), "");
+        assert_eq!(idle.ring_percent(), 0.0);
+        assert!(!idle.low());
+        assert!(idle.dimmed());
+    }
+
+    #[test]
+    fn a_usage_state_shows_a_whole_percent_and_is_not_dimmed() {
+        let state = MenuBarState::Usage {
+            percent: 2,
+            low: false,
+        };
+        assert_eq!(state.title(), "2%");
+        assert_eq!(state.ring_percent(), 2.0);
+        assert!(!state.dimmed());
+    }
+
+    #[test]
+    fn only_a_low_usage_state_goes_red() {
+        assert!(MenuBarState::Usage {
+            percent: 92,
+            low: true,
+        }
+        .low());
+        assert!(!MenuBarState::Usage {
+            percent: 92,
+            low: false,
+        }
+        .low());
+        assert!(!MenuBarState::Idle.low());
     }
 }

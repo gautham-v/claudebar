@@ -56,8 +56,8 @@ PLIST
 
 # Sign with a stable identity when the machine has one. Ad-hoc signatures get a
 # fresh code identity on every rebuild, which makes macOS treat each build as a
-# different app: TCC re-prompts for calendar access (and claudebar re-prompts for
-# its Keychain item) every single launch. Override with CODESIGN_IDENTITY.
+# different app, so macOS re-prompts for access to the Claude Code Keychain item
+# on every single launch. Override with CODESIGN_IDENTITY.
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \

@@ -1,8 +1,6 @@
 //! claudebar as a library, so examples and tests can build the views without
 //! going through the menu-bar binary.
 
-#![allow(dead_code)]
-
 pub mod launch_at_login;
 pub mod local;
 pub mod menu_bar_icon;
