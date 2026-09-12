@@ -3,8 +3,9 @@
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
 
-/// Utilization at or past which a limit is drawn in red — the same rule as the
-/// battery item, which goes red with 20% left.
+/// How little of a window has to be left before it is drawn in red, by
+/// default — the same rule as the battery item, which goes red with 20% left.
+/// [`crate::settings::Settings`] starts here and the user can move it.
 pub const LOW_REMAINING_PERCENT: f32 = 20.0;
 
 /// Which limit a ring stands for.
@@ -38,9 +39,12 @@ impl Limit {
         }
     }
 
-    /// Whether this limit should be drawn in red (20% or less left).
-    pub fn is_low(&self) -> bool {
-        self.percent >= 100.0 - LOW_REMAINING_PERCENT
+    /// Whether this limit should be drawn in red: less than
+    /// `low_remaining_percent` of the window is left. The threshold is passed
+    /// in rather than read from a const because it is a setting; the const is
+    /// only the default the settings start from.
+    pub fn is_low(&self, low_remaining_percent: f32) -> bool {
+        self.percent >= 100.0 - low_remaining_percent
     }
 
     /// The reset time as the mockup shows it: "6:29 PM" when it is today,
@@ -147,9 +151,18 @@ mod tests {
 
     #[test]
     fn red_starts_with_twenty_percent_left() {
-        assert!(!limit(79.6).is_low());
-        assert!(limit(80.0).is_low());
-        assert!(limit(100.0).is_low());
+        assert!(!limit(79.6).is_low(LOW_REMAINING_PERCENT));
+        assert!(limit(80.0).is_low(LOW_REMAINING_PERCENT));
+        assert!(limit(100.0).is_low(LOW_REMAINING_PERCENT));
+    }
+
+    #[test]
+    fn a_wider_threshold_goes_red_sooner() {
+        assert!(limit(60.0).is_low(40.0));
+        assert!(!limit(60.0).is_low(20.0));
+        // A threshold of zero only fires on a window that is entirely spent.
+        assert!(!limit(99.0).is_low(0.0));
+        assert!(limit(100.0).is_low(0.0));
     }
 
     #[test]

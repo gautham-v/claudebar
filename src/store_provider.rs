@@ -17,6 +17,7 @@ use gpui::AsyncApp;
 
 use crate::local;
 use crate::model::{LocalStats, Usage};
+use crate::settings::Settings;
 use crate::status_item::MenuBarState;
 use crate::ui::provider::{ProviderState, UsageProvider};
 use crate::usage::{self, UsageError};
@@ -44,18 +45,37 @@ pub struct StoreProvider {
     on_change: RefCell<Option<OnChange>>,
     /// A fetch is already out; a second popover open should not start another.
     fetching: Arc<Mutex<bool>>,
+    /// The user's choices, read once at construction and rewritten whenever
+    /// the "···" menu changes one.
+    settings: RefCell<Settings>,
+    /// A complaint about the config file — malformed on load, or unwritable on
+    /// save. Shown as the popover's muted line, but never in place of a fetch
+    /// error, which is the more urgent of the two.
+    settings_note: RefCell<Option<String>>,
 }
 
 impl StoreProvider {
     /// Build the provider. Nothing is fetched until [`Self::refresh`] runs, so
-    /// this never blocks and never fails.
+    /// this never blocks and never fails. The settings file is small enough to
+    /// read here on the main thread, and everything downstream — the first menu
+    /// bar title included — needs it before the first fetch lands.
     pub fn new(cx: &AsyncApp) -> Self {
+        let (settings, note) = Settings::load();
         Self {
             snapshot: Arc::new(Mutex::new(Snapshot::default())),
             cx: cx.clone(),
             on_change: RefCell::new(None),
             fetching: Arc::new(Mutex::new(false)),
+            settings: RefCell::new(settings),
+            settings_note: RefCell::new(note),
         }
+    }
+
+    /// How often `main.rs` should refetch. Read once at startup: changing the
+    /// interval is a config-file edit, and a relaunch to pick it up is a fair
+    /// price for not having to restart the timer loop from a menu click.
+    pub fn refresh_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.settings.borrow().refresh_minutes * 60)
     }
 
     /// Install the main-thread hook run after every background task.
@@ -63,10 +83,14 @@ impl StoreProvider {
         *self.on_change.borrow_mut() = Some(hook);
     }
 
-    /// What the menu bar item should draw: the session limit, or nothing at all
-    /// while loading, signed out or errored without a previous snapshot.
+    /// What the menu bar item should draw: whichever limit the settings name,
+    /// or nothing at all while loading, signed out, errored without a previous
+    /// snapshot, or when that limit is not in the snapshot at all.
     pub fn menu_bar_state(&self) -> MenuBarState {
-        menu_bar_state_for(self.snapshot.lock().unwrap().usage.as_ref())
+        menu_bar_state_for(
+            self.snapshot.lock().unwrap().usage.as_ref(),
+            &self.settings.borrow(),
+        )
     }
 
     /// Run both fetches off the main thread, then fire the change hook.
@@ -124,11 +148,13 @@ impl StoreProvider {
 /// The menu bar item's state for a snapshot. A free function so the mapping —
 /// the only part of this file that is pure — is exercised by the tests below
 /// rather than reimplemented by them.
-fn menu_bar_state_for(usage: Option<&Usage>) -> MenuBarState {
-    match usage.and_then(|u| u.session()) {
-        Some(session) => MenuBarState::Usage {
-            percent: session.percent_rounded(),
-            low: session.is_low(),
+fn menu_bar_state_for(usage: Option<&Usage>, settings: &Settings) -> MenuBarState {
+    let chosen = usage.and_then(|u| u.limits.iter().find(|l| settings.menu_bar.matches(l)));
+    match chosen {
+        Some(limit) => MenuBarState::Usage {
+            percent: limit.percent_rounded(),
+            low: limit.is_low(settings.low_remaining_percent),
+            show_percent: settings.show_percent,
         },
         None => MenuBarState::Idle,
     }
@@ -137,9 +163,18 @@ fn menu_bar_state_for(usage: Option<&Usage>) -> MenuBarState {
 impl UsageProvider for StoreProvider {
     fn state(&self) -> ProviderState {
         let snapshot = self.snapshot.lock().unwrap();
-        match &snapshot.state {
+        let state = match &snapshot.state {
             Some(state) => state.clone(),
             None => ProviderState::Loading,
+        };
+        // A config complaint is worth one muted line, but only when the fetch
+        // has nothing more urgent to say: an error or a signed-out state owns
+        // that line, and being signed out changes the whole popover.
+        match (&state, self.settings_note.borrow().clone()) {
+            (ProviderState::Loading | ProviderState::Ready, Some(note)) => {
+                ProviderState::Error(note)
+            }
+            _ => state,
         }
     }
 
@@ -163,6 +198,27 @@ impl UsageProvider for StoreProvider {
             .as_ref()
             .map(|u| u.fetched_at)
     }
+
+    fn settings(&self) -> Settings {
+        self.settings.borrow().clone()
+    }
+
+    /// Take the new settings, write them out, and run the change hook so the
+    /// menu bar item is re-titled and the popover re-rendered. The settings are
+    /// applied whether or not the write succeeds — refusing a menu click
+    /// because a directory is read-only would be the wrong trade — and a failed
+    /// write becomes the notice line. A successful one clears whatever the
+    /// notice was saying about the file, including a load-time complaint that
+    /// this write has just fixed.
+    fn set_settings(&self, settings: Settings) {
+        *self.settings.borrow_mut() = settings;
+        *self.settings_note.borrow_mut() = self.settings.borrow().save().err();
+        let hook = self.on_change.borrow().clone();
+        if let Some(hook) = hook {
+            let cx = self.cx.clone();
+            let _ = cx.update(|cx| hook(cx));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -182,18 +238,24 @@ mod tests {
         }
     }
 
+    use crate::settings::MenuBarLimit;
+
     #[test]
     fn no_snapshot_leaves_the_menu_bar_idle() {
-        assert_eq!(menu_bar_state_for(None), MenuBarState::Idle);
+        assert_eq!(
+            menu_bar_state_for(None, &Settings::default()),
+            MenuBarState::Idle
+        );
     }
 
     #[test]
     fn a_session_limit_becomes_a_rounded_percent() {
         assert_eq!(
-            menu_bar_state_for(Some(&usage_with(2.4))),
+            menu_bar_state_for(Some(&usage_with(2.4)), &Settings::default()),
             MenuBarState::Usage {
                 percent: 2,
-                low: false
+                low: false,
+                show_percent: true
             }
         );
     }
@@ -201,10 +263,11 @@ mod tests {
     #[test]
     fn a_nearly_spent_session_goes_red() {
         assert_eq!(
-            menu_bar_state_for(Some(&usage_with(84.0))),
+            menu_bar_state_for(Some(&usage_with(84.0)), &Settings::default()),
             MenuBarState::Usage {
                 percent: 84,
-                low: true
+                low: true,
+                show_percent: true
             }
         );
     }
@@ -223,6 +286,75 @@ mod tests {
             plan: None,
             fetched_at: Local::now(),
         };
-        assert_eq!(menu_bar_state_for(Some(&weekly_only)), MenuBarState::Idle);
+        assert_eq!(
+            menu_bar_state_for(Some(&weekly_only), &Settings::default()),
+            MenuBarState::Idle
+        );
+    }
+
+    /// The same snapshot, read through a setting that names the weekly window.
+    #[test]
+    fn the_settings_pick_which_limit_the_menu_bar_tracks() {
+        let usage = Usage {
+            limits: vec![
+                Limit {
+                    kind: LimitKind::Session,
+                    percent: 2.0,
+                    resets_at: None,
+                },
+                Limit {
+                    kind: LimitKind::Weekly,
+                    percent: 55.0,
+                    resets_at: None,
+                },
+                Limit {
+                    kind: LimitKind::Model("Fable".into()),
+                    percent: 71.0,
+                    resets_at: None,
+                },
+            ],
+            plan: None,
+            fetched_at: Local::now(),
+        };
+        let with = |menu_bar| {
+            menu_bar_state_for(
+                Some(&usage),
+                &Settings {
+                    menu_bar,
+                    ..Settings::default()
+                },
+            )
+        };
+        assert!(matches!(
+            with(MenuBarLimit::Weekly),
+            MenuBarState::Usage { percent: 55, .. }
+        ));
+        assert!(matches!(
+            with(MenuBarLimit::Model("Fable".into())),
+            MenuBarState::Usage { percent: 71, .. }
+        ));
+        // A limit the account does not have leaves the item idle rather than
+        // silently showing a different window's number.
+        assert_eq!(with(MenuBarLimit::Model("Opus".into())), MenuBarState::Idle);
+    }
+
+    #[test]
+    fn the_settings_carry_the_low_threshold_and_the_number() {
+        let state = menu_bar_state_for(
+            Some(&usage_with(65.0)),
+            &Settings {
+                low_remaining_percent: 40.0,
+                show_percent: false,
+                ..Settings::default()
+            },
+        );
+        assert_eq!(
+            state,
+            MenuBarState::Usage {
+                percent: 65,
+                low: true,
+                show_percent: false
+            }
+        );
     }
 }

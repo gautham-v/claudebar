@@ -5,8 +5,12 @@
 //! token and without waiting for a fetch:
 //!
 //! ```text
-//! cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error
+//! cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|menu
 //! ```
+//!
+//! `menu` is `ready` with the "···" menu already open: the preview window takes
+//! no clicks, so the only way to see (and screenshot) the menu is to start with
+//! it down.
 
 use std::rc::Rc;
 
@@ -42,6 +46,7 @@ impl Render for Preview {
 
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "ready".into());
+    let menu_open = mode == "menu";
 
     Application::new().run(move |cx: &mut App| {
         popover::bind_keys(cx);
@@ -69,7 +74,11 @@ fn main() {
                         "error" => StubProvider::with_error("Offline"),
                         _ => StubProvider::new(),
                     });
-                    Popover::with_provider(provider, cx)
+                    let mut popover = Popover::with_provider(provider, cx);
+                    if menu_open {
+                        popover.open_menu(cx);
+                    }
+                    popover
                 });
 
                 cx.subscribe(&popover, |_, event, _| match event {

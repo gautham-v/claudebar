@@ -14,8 +14,28 @@ language, same repo layout. MIT, open source.
 - `docs/mockup-menubar.dc.html` — the approved menu bar item: percentage then ring, the way the
   battery item sits, and the red state.
 
+## Settings
+`src/settings.rs`, a TOML file at `~/.config/claudebar/config.toml`
+(`dirs::config_dir()/claudebar/config.toml`), written by the "···" menu and editable by hand:
+
+| key | default | what it does |
+|---|---|---|
+| `menu_bar` | `"session"` | which limit the menu bar item tracks: `"session"`, `"weekly"`, or a model display name as the API spells it (`"Fable"`) |
+| `show_percent` | `true` | `false` draws the ring alone, with no number and no fade |
+| `low_remaining_percent` | `20.0` | how little of a window is left before it goes red |
+| `refresh_minutes` | `5` | poll interval, read once at startup |
+
+Every key has a serde default, so a partial file works and unknown keys are ignored.
+`Settings::load() -> (Settings, Option<String>)`: defaults when the file is missing, and a
+human-readable note when it is malformed, which the popover shows as its muted notice line
+(never in place of a fetch error). `low_remaining_percent` is clamped to 0..=100 and
+`refresh_minutes` to >= 1 on load. `Limit::is_low(low_remaining_percent)` takes the threshold;
+`model::LOW_REMAINING_PERCENT` is only the default `Settings` starts from. The provider seam
+carries `settings()` / `set_settings()`; `StoreProvider` persists on set and then runs the
+on-change hook so the menu bar item is re-titled.
+
 ## Data
-Two sources, both already on the machine. No account of its own, no config.
+Two sources, both already on the machine. No account of its own; one optional config file.
 
 1. **Limits** — `GET https://api.anthropic.com/api/oauth/usage` with
    `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. The token is the
@@ -54,14 +74,14 @@ The shared types are in `src/model.rs`; the UI seam is `src/ui/provider.rs`
 (`UsageProvider`, `StubProvider`). Do not change their public shape without updating both.
 
 ## Menu bar item
-- `NSStatusItem` with the session percentage as the title **first** and the ring image
+- `NSStatusItem` with the tracked limit's percentage as the title **first** and the ring image
   **after** it (`NSCellImagePosition::ImageTrailing`, `imageHugsTitle`), menu bar font, so it
   sits like the battery item. Title "2%" (whole number). While loading or signed out: no title,
   ring at 0%, `appearsDisabled`.
 - The ring: 16×16pt, drawn at runtime with Core Graphics (`src/menu_bar_icon.rs`): a track
   circle at 30% alpha, 2.5pt stroke, and an arc from 12 o'clock clockwise for the session's
-  percent, round caps. Normally a template image so the menu bar tints it. **With 20% or less
-  of the window left (`Limit::is_low`), both the number and the ring go red**: the ring is
+  percent, round caps. Normally a template image so the menu bar tints it. **With `low_remaining_percent`
+  or less of the window left (`Limit::is_low`), both the number and the ring go red**: the ring is
   drawn as a non-template image in `NSColor::systemRedColor` and the title gets an attributed
   string with the same colour. No amber, no other colours. Redraw whenever a fetch lands.
 - Click toggles the popover; clicking outside or pressing Esc closes it. No Dock icon.
@@ -86,8 +106,12 @@ Top to bottom, per the mockup:
    weekday initials row under them in 10px tertiary.
 6. Rule, then footer: "Updated 1:37 PM" left in tertiary; "Refresh" and "claude.ai" text
    buttons right (claude.ai opens `https://claude.ai/settings/usage` in the browser).
-- "···" menu: Refresh, Launch at login (SMAppService toggle, from `launch_at_login.rs`), rule,
-  Quit Claudebar. Same look as mailbar's.
+- "···" menu: Refresh; a "Menu bar shows" section header in 10px tertiary over one checkmark
+  row per limit in the current snapshot ("Session", "Week", then each model — just Session and
+  Week before the first fetch); a "Show percentage" checkmark row; Launch at login (SMAppService
+  toggle, from `launch_at_login.rs`); rule; Quit Claudebar. Same look as mailbar's. Picking a row
+  calls `UsageProvider::set_settings` and closes the menu. The popover is `overflow_hidden`, so
+  `preferred_height()` grows to the menu's height while it is open.
 - Keys: Esc closes (collapses the menu first), `r` refreshes.
 - Light/dark follows the window appearance (`Theme::for_appearance`).
 - `preferred_height()` adds up the sections so `main.rs` can size the window; the popover
@@ -103,6 +127,7 @@ rustls), serde/serde_json, keyring, dirs.
 - `src/main.rs` — app entry, activation policy, status item, popover window management (copy
   mailbar's shape: `StatusItem` click channel, `PopUp` window under the item, resize on notify)
 - `src/model.rs` — `Usage`, `Limit`, `DayStats`, `LocalStats` (pure, unit-tested)
+- `src/settings.rs` — the config file and its defaults (pure, unit-tested)
 - `src/usage.rs` — Keychain read + the usage request + parsing (parsing unit-tested on the
   JSON above)
 - `src/local.rs` — the session-log scan (unit-tested on a fixture written to a temp dir)
@@ -111,7 +136,8 @@ rustls), serde/serde_json, keyring, dirs.
 - `src/menu_bar_icon.rs` — the ring image; `src/status_item.rs` — Cocoa glue
 - `src/ui/` — `popover.rs` root view, `rings.rs`, `stats.rs`, `provider.rs`, `theme.rs`
 - `examples/popover_preview.rs` — the popover in a normal window over `StubProvider`;
-  modes: `ready` (default), `nearly-out`, `signed-out`, `loading`, `error`
+  modes: `ready` (default), `nearly-out`, `signed-out`, `loading`, `error`, `menu` (ready with
+  the "···" menu already down, since the preview takes no clicks)
 - `scripts/bundle.sh` → `target/Claudebar.app`; `Makefile` — `make run`, `make install`,
   `make test`, `make check` (fmt + clippy `-D warnings`)
 

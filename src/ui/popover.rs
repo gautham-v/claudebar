@@ -22,7 +22,8 @@ use gpui::{
 };
 
 use crate::launch_at_login;
-use crate::model::{DayStats, LocalStats};
+use crate::model::{DayStats, LimitKind, LocalStats};
+use crate::settings::{MenuBarLimit, Settings};
 use crate::ui::provider::{ProviderState, UsageProvider};
 use crate::ui::theme::{self, Theme};
 use crate::ui::{rings, stats};
@@ -136,6 +137,13 @@ impl Popover {
         self.reload(cx);
     }
 
+    /// Open the "···" menu without a click — the preview example's `menu` mode,
+    /// which cannot click.
+    pub fn open_menu(&mut self, cx: &mut Context<Self>) {
+        self.menu_open = true;
+        cx.notify();
+    }
+
     fn toggle_menu(&mut self, cx: &mut Context<Self>) {
         self.menu_open = !self.menu_open;
         cx.notify();
@@ -172,7 +180,7 @@ impl Popover {
         } else {
             0.0
         };
-        px(HEADER_HEIGHT
+        let content = HEADER_HEIGHT
             + notice
             + limits
             + RULE
@@ -180,7 +188,46 @@ impl Popover {
             + RULE
             + stats::week_height()
             + RULE
-            + FOOTER_HEIGHT)
+            + FOOTER_HEIGHT;
+        // The popover clips its children, and the "···" menu is drawn over
+        // them rather than inside the flow, so a menu taller than what is under
+        // it would lose its last rows. Growing the window while the menu is
+        // open is cheaper than shrinking the rows: the extra height is only
+        // there for as long as the menu is.
+        let with_menu = if self.menu_open {
+            content.max(MENU_TOP + self.menu_height() + MENU_BOTTOM_MARGIN)
+        } else {
+            content
+        };
+        px(with_menu)
+    }
+
+    /// How tall the "···" menu is, from the rows it will draw. Kept as
+    /// arithmetic over the row constants rather than measured, because
+    /// `preferred_height` runs before the menu is laid out.
+    fn menu_height(&self) -> f32 {
+        let rows = 1.0 // Refresh
+            + self.menu_bar_choices().len() as f32
+            + 1.0 // Show percentage
+            + 1.0 // Launch at login
+            + 1.0; // Quit Claudebar
+        let login_note = if launch_at_login::availability() != launch_at_login::Availability::Ready
+        {
+            MENU_NOTE_HEIGHT
+        } else {
+            0.0
+        };
+        let login_error = if self.login_error.is_some() {
+            MENU_NOTE_HEIGHT
+        } else {
+            0.0
+        };
+        MENU_PAD * 2.0
+            + rows * MENU_ROW_HEIGHT
+            + MENU_SECTION_HEIGHT
+            + MENU_RULE_HEIGHT
+            + login_note
+            + login_error
     }
 
     /// The muted line under the header, when there is something to say. A
@@ -270,7 +317,7 @@ impl Popover {
         let checked = launch_at_login::is_enabled();
         let note = |message: SharedString| {
             div()
-                .px(px(10.))
+                .px(px(MENU_ROW_PAD_X))
                 .pb(px(4.))
                 .text_size(theme::TEXT_MICRO)
                 .line_height(px(13.))
@@ -284,11 +331,11 @@ impl Popover {
             .child(
                 div()
                     .id("menu-login")
-                    .px(px(10.))
-                    .py(px(5.))
+                    .px(px(MENU_ROW_PAD_X))
+                    .py(px(MENU_ROW_PAD_Y))
                     .rounded(px(5.))
                     .text_size(theme::TEXT_SMALL)
-                    .line_height(px(17.))
+                    .line_height(px(MENU_ROW_LINE))
                     .text_color(if available {
                         theme.text
                     } else {
@@ -325,19 +372,112 @@ impl Popover {
         cx.notify();
     }
 
+    /// The rows the "Menu bar shows" section offers: one per limit the last
+    /// snapshot carried, in the order the rings are drawn. Before the first
+    /// fetch lands there is nothing to enumerate, so the two windows every
+    /// account has stand in — picking one of them is still meaningful.
+    fn menu_bar_choices(&self) -> Vec<(MenuBarLimit, SharedString)> {
+        let limits = self.provider.usage().map(|u| u.limits).unwrap_or_default();
+        if limits.is_empty() {
+            return vec![
+                (MenuBarLimit::Session, "Session".into()),
+                (MenuBarLimit::Weekly, "Week".into()),
+            ];
+        }
+        limits
+            .iter()
+            .map(|limit| {
+                let choice = match &limit.kind {
+                    LimitKind::Session => MenuBarLimit::Session,
+                    LimitKind::Weekly => MenuBarLimit::Weekly,
+                    LimitKind::Model(name) => MenuBarLimit::Model(name.clone()),
+                };
+                (choice, SharedString::from(limit.label().to_string()))
+            })
+            .collect()
+    }
+
+    /// A menu row with a checkmark on the right, styled exactly like the
+    /// "Launch at login" row so the whole menu reads as one list.
+    fn check_item(
+        &self,
+        id: SharedString,
+        label: SharedString,
+        checked: bool,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> impl IntoElement {
+        let theme = self.theme;
+        div()
+            .id(id)
+            .px(px(MENU_ROW_PAD_X))
+            .py(px(MENU_ROW_PAD_Y))
+            .rounded(px(5.))
+            .text_size(theme::TEXT_SMALL)
+            .line_height(px(MENU_ROW_LINE))
+            .text_color(theme.text)
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.hover))
+            .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
+            .child(label)
+            .child(if checked { "\u{2713}" } else { "" })
+    }
+
+    /// A small label over a group of rows.
+    fn menu_section(&self, label: &'static str) -> impl IntoElement {
+        div()
+            .px(px(MENU_ROW_PAD_X))
+            .pt(px(MENU_SECTION_PAD_TOP))
+            .pb(px(MENU_SECTION_PAD_BOTTOM))
+            .text_size(theme::TEXT_MICRO)
+            .line_height(px(MENU_SECTION_LINE))
+            .text_color(self.theme.tertiary)
+            .child(label)
+    }
+
+    /// Point the menu bar item at another limit, persist it, and close.
+    fn choose_menu_bar_limit(&mut self, limit: MenuBarLimit, cx: &mut Context<Self>) {
+        self.update_settings(cx, |settings| settings.menu_bar = limit);
+    }
+
+    /// Turn the menu bar's number on or off, persist it, and close.
+    fn toggle_show_percent(&mut self, cx: &mut Context<Self>) {
+        self.update_settings(cx, |settings| {
+            settings.show_percent = !settings.show_percent
+        });
+    }
+
+    /// The one path a menu row takes to change a setting: read what the
+    /// provider holds, change the one field, hand it back. The provider
+    /// persists it and re-renders both the popover and the menu bar item, so
+    /// there is nothing to copy into this view.
+    fn update_settings(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut Settings)) {
+        let mut settings = self.provider.settings();
+        change(&mut settings);
+        self.provider.set_settings(settings);
+        self.menu_open = false;
+        cx.notify();
+    }
+
     /// The "···" dropdown, drawn over the content.
     fn menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
+        let settings = self.provider.settings();
         let item = |id: &'static str,
                     label: &'static str,
                     cx: &mut Context<Self>,
                     action: fn(&mut Self, &mut Context<Self>)| {
             div()
                 .id(id)
-                .px(px(10.))
-                .py(px(5.))
+                .px(px(MENU_ROW_PAD_X))
+                .py(px(MENU_ROW_PAD_Y))
                 .rounded(px(5.))
                 .text_size(theme::TEXT_SMALL)
+                .line_height(px(MENU_ROW_LINE))
                 .text_color(theme.text)
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.hover))
@@ -349,10 +489,10 @@ impl Popover {
             .absolute()
             // Without this the content underneath gets the same click.
             .occlude()
-            .top(px(HEADER_HEIGHT - 2.0))
+            .top(px(MENU_TOP))
             .right(theme::PAD_X)
             .w(px(160.))
-            .p(px(4.))
+            .p(px(MENU_PAD))
             .rounded(px(8.))
             .bg(theme.menu_bg)
             .border_1()
@@ -362,8 +502,32 @@ impl Popover {
             .child(item("menu-refresh", "Refresh", cx, |this, cx| {
                 this.refresh(cx)
             }))
+            .child(self.menu_section(MENU_BAR_SECTION))
+            .children(
+                self.menu_bar_choices()
+                    .into_iter()
+                    .map(|(choice, label)| {
+                        let checked = choice == settings.menu_bar;
+                        self.check_item(
+                            SharedString::from(format!("menu-limit-{}", choice.as_config_str())),
+                            label,
+                            checked,
+                            cx,
+                            move |this, cx| this.choose_menu_bar_limit(choice.clone(), cx),
+                        )
+                        .into_any_element()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .child(self.check_item(
+                "menu-show-percent".into(),
+                "Show percentage".into(),
+                settings.show_percent,
+                cx,
+                |this, cx| this.toggle_show_percent(cx),
+            ))
             .child(self.launch_at_login_item(cx))
-            .child(div().h(px(RULE)).my(px(4.)).bg(theme.separator))
+            .child(div().h(px(RULE)).my(px(MENU_PAD)).bg(theme.separator))
             .child(item("menu-quit", "Quit Claudebar", cx, |this, cx| {
                 this.menu_open = false;
                 cx.quit();
@@ -455,6 +619,26 @@ pub const NOTICE_HEIGHT: f32 = 18.0;
 pub const SIGNED_OUT_HEIGHT: f32 = 10.0 + 19.0 + 14.0;
 /// A hairline separator.
 pub const RULE: f32 = 1.0;
+/// The label over the limit rows in the "···" menu.
+const MENU_BAR_SECTION: &str = "Menu bar shows";
+/// One menu row: the mockup's 10/5 padding around a 17px line.
+const MENU_ROW_PAD_X: f32 = 10.0;
+const MENU_ROW_PAD_Y: f32 = 5.0;
+const MENU_ROW_LINE: f32 = 17.0;
+const MENU_ROW_HEIGHT: f32 = MENU_ROW_PAD_Y * 2.0 + MENU_ROW_LINE;
+/// The section label over the limit rows.
+const MENU_SECTION_PAD_TOP: f32 = 6.0;
+const MENU_SECTION_PAD_BOTTOM: f32 = 2.0;
+const MENU_SECTION_LINE: f32 = 13.0;
+const MENU_SECTION_HEIGHT: f32 = MENU_SECTION_PAD_TOP + MENU_SECTION_LINE + MENU_SECTION_PAD_BOTTOM;
+/// The menu's own padding, and the rule above Quit with its margins.
+const MENU_PAD: f32 = 4.0;
+const MENU_RULE_HEIGHT: f32 = RULE + 8.0;
+/// A note under the login row (no bundle, or a failed toggle).
+const MENU_NOTE_HEIGHT: f32 = 13.0 + 4.0;
+/// Where the menu hangs from, and the room left under it.
+const MENU_TOP: f32 = HEADER_HEIGHT - 2.0;
+const MENU_BOTTOM_MARGIN: f32 = 8.0;
 /// The mockup's `8px 14px 9px` footer padding around an 11px line.
 const FOOTER_PAD_TOP: f32 = 8.0;
 const FOOTER_PAD_BOTTOM: f32 = 9.0;
@@ -569,6 +753,21 @@ mod tests {
         let ready = total(rings::height(), 0.0, 171.0);
         assert_eq!(total(rings::height(), NOTICE_HEIGHT, 171.0) - ready, 18.0);
         assert!(total(SIGNED_OUT_HEIGHT, NOTICE_HEIGHT, 171.0) < ready);
+    }
+
+    /// The menu hangs off the header and the popover clips its children, so the
+    /// window has to be at least as tall as the menu while it is open.
+    #[test]
+    fn an_open_menu_never_reaches_past_the_popover() {
+        // The tallest menu: three limits plus a note under the login row.
+        let rows = 3.0 + 4.0;
+        let menu = MENU_PAD * 2.0
+            + rows * MENU_ROW_HEIGHT
+            + MENU_SECTION_HEIGHT
+            + MENU_RULE_HEIGHT
+            + MENU_NOTE_HEIGHT;
+        let ready = total(rings::height(), 0.0, 171.0);
+        assert!(MENU_TOP + menu + MENU_BOTTOM_MARGIN < ready);
     }
 
     #[test]

@@ -29,11 +29,6 @@ const SCREEN_MARGIN: f32 = 8.0;
 const TOGGLE_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 /// The popover never gets shorter than this, however little room there is.
 const MIN_POPOVER_HEIGHT: f32 = 160.0;
-/// How often the limits and the local scan are refetched in the background.
-/// The usage endpoint is cheap and the numbers move slowly, so five minutes is
-/// plenty to keep the menu bar honest without hammering it.
-const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
-
 /// The popover window, when one is open.
 type WindowSlot = Rc<RefCell<Option<WindowHandle<Popover>>>>;
 
@@ -69,12 +64,15 @@ fn main() {
                 popover.update(cx, |this, cx| this.reload(cx));
             }));
         }
-        // First fill, then every five minutes.
+        // First fill, then on the interval the settings ask for. The interval
+        // is read once here: changing it is a config-file edit, and picking the
+        // new value up on the next launch is fine for a five-minute poll.
         store.refresh();
         {
+            let refresh_every = store.refresh_interval();
             let store = store.clone();
             cx.spawn(async move |cx| loop {
-                cx.background_executor().timer(REFRESH_EVERY).await;
+                cx.background_executor().timer(refresh_every).await;
                 if cx.update(|_| store.refresh()).is_err() {
                     break;
                 }

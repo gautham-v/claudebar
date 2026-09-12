@@ -44,6 +44,7 @@ const MIN_VISIBLE_PERCENT: f32 = 0.5;
 pub fn render(popover: &Popover, _cx: &mut Context<Popover>) -> impl IntoElement {
     let theme = popover.theme();
     let now = popover.now();
+    let low_remaining = popover.provider().settings().low_remaining_percent;
     let limits = popover
         .provider()
         .usage()
@@ -75,7 +76,7 @@ pub fn render(popover: &Popover, _cx: &mut Context<Popover>) -> impl IntoElement
     row.gap(theme::RING_GAP).children(
         limits
             .iter()
-            .map(|limit| ring(limit, theme, now))
+            .map(|limit| ring(limit, theme, now, low_remaining))
             .collect::<Vec<_>>(),
     )
 }
@@ -93,8 +94,13 @@ pub fn height() -> f32 {
 }
 
 /// One ring: the dial, the label, and the reset caption.
-fn ring(limit: &Limit, theme: Theme, now: chrono::DateTime<chrono::Local>) -> impl IntoElement {
-    let arc_color = if limit.is_low() {
+fn ring(
+    limit: &Limit,
+    theme: Theme,
+    now: chrono::DateTime<chrono::Local>,
+    low_remaining_percent: f32,
+) -> impl IntoElement {
+    let arc_color = if limit.is_low(low_remaining_percent) {
         theme.warning
     } else {
         theme.accent

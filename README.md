@@ -3,10 +3,10 @@
 A macOS menu bar view of your Claude usage limits, written in Rust with [GPUI](https://www.gpui.rs/).
 Sibling of [daybar](../daybar) and [mailbar](../mailbar): same stack, same visual language.
 
-The menu bar shows one number and a small ring — how much of your current five-hour session
-window you have used — sitting the way the battery item does, percentage first and glyph after.
+The menu bar shows one number and a small ring — how much of the window you are tracking you have used — the
+current five-hour session by default — sitting the way the battery item does, percentage first and glyph after.
 The ring is drawn at runtime as a template image, so it tints itself for light and dark like the
-system glyphs do; with 20% or less of the window left both the number and the ring go red. Click
+system glyphs do; with 20% or less of the window left (`low_remaining_percent`) both the number and the ring go red. Click
 it and a 320px popover drops down with a ring per limit (session, week, and one per model your
 plan meters separately), each with what it resets to and when. Under that, what you did today —
 sessions, tool calls, tokens, and a bar per model — and a seven-day sparkline of tokens per day,
@@ -36,13 +36,32 @@ make check    # cargo fmt --check && cargo clippy --all-targets -D warnings
 single log file, against stub data:
 
 ```sh
-cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error
+cargo run --example popover_preview -- ready|nearly-out|signed-out|loading|error|menu
 ```
+
+## Settings
+
+claudebar runs with no configuration. What little there is to choose lives in the `···` menu —
+a **Menu bar shows** section with one row per limit (Session, Week, and each model your plan
+meters separately) and a **Show percentage** toggle — and is written to
+`~/.config/claudebar/config.toml`, which you can also edit by hand:
+
+| key | default | what it does |
+|---|---|---|
+| `menu_bar` | `"session"` | which limit the menu bar item tracks: `"session"`, `"weekly"`, or a model display name as the API spells it, e.g. `"Fable"` |
+| `show_percent` | `true` | `false` shows the ring alone, with no number beside it |
+| `low_remaining_percent` | `20.0` | how little of a window has to be left before the ring and the number go red |
+| `refresh_minutes` | `5` | how often the limits and the local scan are refetched; read once at startup |
+
+The menu-bar section of the `···` menu writes that same file, so a choice made there survives a
+relaunch. Every key is optional: a file with one line in it is a valid file, unknown keys are
+ignored, and a file that does not parse is ignored with one muted line in the popover saying so
+rather than stopping the app.
 
 ## Where the numbers come from
 
 Two sources, both already on your machine. claudebar has no account of its own, no server, and
-nothing to configure.
+nothing to configure beyond the handful of display settings above.
 
 **The rings** come from `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint
 Claude Code's own `/usage` command calls, with the same OAuth bearer token. That token is read
@@ -109,15 +128,17 @@ asking.
 claudebar makes exactly one network request: the usage endpoint above, with the token Claude
 Code already stores. It does not refresh, rewrite or export that token, and it writes no
 credentials of its own. Your session logs are parsed locally and the numbers derived from them
-never leave the machine. There is no telemetry, no analytics and no config file.
+never leave the machine. There is no telemetry and no analytics. The only file claudebar writes is
+`~/.config/claudebar/config.toml`, which holds the display settings above and nothing else.
 
 ## How it fits together
 
 - `src/main.rs`, `src/status_item.rs` — the `NSStatusItem` and the popover window (anchored
-  under the item, closed on Esc, outside click or focus loss), and the 5-minute refresh timer.
+  under the item, closed on Esc, outside click or focus loss), and the refresh timer (`refresh_minutes`).
 - `src/menu_bar_icon.rs` — the ring glyph, drawn with Core Graphics.
 - `src/model.rs` — `Usage`, `Limit`, `DayStats`, `LocalStats` and the formatting helpers (pure,
   unit-tested).
+- `src/settings.rs` — `~/.config/claudebar/config.toml` and its defaults.
 - `src/usage.rs` — the Keychain read, the request and the response parsing.
 - `src/local.rs` — the session-log scan.
 - `src/store_provider.rs` — the seam: both sources run on `cx.background_executor()` and

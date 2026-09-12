@@ -43,17 +43,27 @@ pub enum MenuBarState {
     /// Loading, signed out, or otherwise nothing to report: an empty ring, no
     /// number, and AppKit's own disabled rendering.
     Idle,
-    /// A session utilisation. `low` is [`crate::model::Limit::is_low`], which
-    /// turns both the number and the ring red.
-    Usage { percent: u32, low: bool },
+    /// The utilisation of whichever limit the user picked. `low` is
+    /// [`crate::model::Limit::is_low`], which turns both the number and the
+    /// ring red; `show_percent` is the user's choice of ring alone or ring
+    /// with a number beside it.
+    Usage {
+        percent: u32,
+        low: bool,
+        show_percent: bool,
+    },
 }
 
 impl MenuBarState {
     /// The number beside the ring. Whole percent, as the spec asks; empty while
-    /// idle so the ring stands alone.
+    /// idle, and empty when the user asked for the ring alone.
     fn title(self) -> String {
         match self {
             MenuBarState::Idle => String::new(),
+            MenuBarState::Usage {
+                show_percent: false,
+                ..
+            } => String::new(),
             MenuBarState::Usage { percent, .. } => format!("{percent}%"),
         }
     }
@@ -72,7 +82,8 @@ impl MenuBarState {
     }
 
     /// Idle states are faded, the way the system items fade when they have
-    /// nothing to say.
+    /// nothing to say. A ring-only item is not idle: it has something to
+    /// report, it just reports it without a number, so it stays full strength.
     fn dimmed(self) -> bool {
         matches!(self, MenuBarState::Idle)
     }
@@ -234,9 +245,10 @@ fn apply_state(button: &NSStatusBarButton, state: MenuBarState) {
 }
 
 /// The point size of the percentage. The menu bar's own font is 13pt, but the
-/// system's battery percentage is set a step smaller, and this item sits right
-/// beside it.
-const TITLE_POINT_SIZE: f64 = 12.0;
+/// system's battery percentage is set smaller, and this item sits right beside
+/// it: measured off a 2x screen capture, the battery digits are 16px tall and
+/// 12pt here came out at 18px, so 11pt is what lines them up.
+const TITLE_POINT_SIZE: f64 = 11.0;
 
 /// The title in the battery item's size, and in the system red when `low` so
 /// it matches the ring. The colour comes from `NSColor` rather than a literal so
@@ -343,9 +355,25 @@ mod tests {
         let state = MenuBarState::Usage {
             percent: 2,
             low: false,
+            show_percent: true,
         };
         assert_eq!(state.title(), "2%");
         assert_eq!(state.ring_percent(), 2.0);
+        assert!(!state.dimmed());
+    }
+
+    /// With the percentage turned off the item is the ring alone: an empty
+    /// title, the same arc, and no fade — it still has something to say.
+    #[test]
+    fn a_ring_only_state_drops_the_number_but_not_the_ring() {
+        let state = MenuBarState::Usage {
+            percent: 42,
+            low: false,
+            show_percent: false,
+        };
+        assert_eq!(state.title(), "");
+        assert_eq!(spaced_title(&state.title()), "");
+        assert_eq!(state.ring_percent(), 42.0);
         assert!(!state.dimmed());
     }
 
@@ -354,11 +382,13 @@ mod tests {
         assert!(MenuBarState::Usage {
             percent: 92,
             low: true,
+            show_percent: true,
         }
         .low());
         assert!(!MenuBarState::Usage {
             percent: 92,
             low: false,
+            show_percent: true,
         }
         .low());
         assert!(!MenuBarState::Idle.low());

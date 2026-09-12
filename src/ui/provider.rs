@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use chrono::{DateTime, Duration, Local, Utc};
 
 use crate::model::{DayStats, Limit, LimitKind, LocalStats, Usage};
+use crate::settings::Settings;
 
 /// What the popover should show above the rings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,11 @@ pub trait UsageProvider {
     fn refresh(&self);
     /// When the limits last landed — the footer's "Updated 1:37 PM".
     fn updated_at(&self) -> Option<DateTime<Local>>;
+    /// The user's choices, as the "···" menu draws them.
+    fn settings(&self) -> Settings;
+    /// Replace them: the implementation persists them and re-renders, and a
+    /// failed write turns into the popover's notice line rather than a panic.
+    fn set_settings(&self, settings: Settings);
 }
 
 /// Fixture-backed provider: the numbers from the approved mockup.
@@ -52,6 +58,9 @@ struct Inner {
     state: ProviderState,
     usage: Option<Usage>,
     local: Option<LocalStats>,
+    /// Kept in memory only: the preview and the tests must never touch the
+    /// real `~/.config/claudebar/config.toml`.
+    settings: Settings,
 }
 
 impl Default for StubProvider {
@@ -68,6 +77,7 @@ impl StubProvider {
                 state: ProviderState::Ready,
                 usage: Some(fixture_usage()),
                 local: Some(fixture_local()),
+                settings: Settings::default(),
             }),
         }
     }
@@ -129,6 +139,12 @@ impl UsageProvider for StubProvider {
     fn refresh(&self) {}
     fn updated_at(&self) -> Option<DateTime<Local>> {
         self.inner.borrow().usage.as_ref().map(|u| u.fetched_at)
+    }
+    fn settings(&self) -> Settings {
+        self.inner.borrow().settings.clone()
+    }
+    fn set_settings(&self, settings: Settings) {
+        self.inner.borrow_mut().settings = settings;
     }
 }
 
@@ -213,6 +229,19 @@ mod tests {
         assert_eq!(crate::model::compact_count(today.tokens), "1.1B");
     }
 
+    /// The stub keeps settings in memory, so the preview and the tests can
+    /// flip them without writing anything to the user's config directory.
+    #[test]
+    fn the_stub_holds_settings_without_a_file() {
+        let stub = StubProvider::new();
+        assert_eq!(stub.settings(), Settings::default());
+        stub.set_settings(Settings {
+            show_percent: false,
+            ..Settings::default()
+        });
+        assert!(!stub.settings().show_percent);
+    }
+
     #[test]
     fn stub_states_render_as_described() {
         assert_eq!(StubProvider::signed_out().state(), ProviderState::SignedOut);
@@ -223,6 +252,6 @@ mod tests {
             .unwrap()
             .limits
             .iter()
-            .all(|l| l.is_low()));
+            .all(|l| l.is_low(crate::model::LOW_REMAINING_PERCENT)));
     }
 }

@@ -5,6 +5,7 @@ pub mod launch_at_login;
 pub mod local;
 pub mod menu_bar_icon;
 pub mod model;
+pub mod settings;
 pub mod status_item;
 pub mod store_provider;
 pub mod ui;
