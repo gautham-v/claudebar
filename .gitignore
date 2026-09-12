@@ -1,0 +1,9 @@
+/target
+.DS_Store
+
+# local
+/.claude
+CLAUDE.md
+AGENTS.md
+client_secret*.json
+*.token

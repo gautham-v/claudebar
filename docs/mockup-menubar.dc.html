@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; } a:hover { color: inherit; }
+  </style>
+</helmet>
+<div style="width: 560px; height: 300px; box-sizing: border-box; background: #f4f4f5; padding: 24px; display: flex; flex-direction: column; gap: 20px; font-size: 13px; color: #1d1d1f;">
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+  <div style="font-size: 12px; color: #6e6e73;">Session limit, percentage then ring, next to daybar and mailbar</div>
+  <div style="height: 30px; background: #3b56c8; border-radius: 6px; display: flex; flex-direction: row; justify-content: flex-end; align-items: center; gap: 22px; padding: 0 14px; color: #fff; font-size: 14px;">
+    <svg width="22" height="16" viewBox="0 0 22 16"><rect x="1" y="1" width="20" height="14" rx="2.5" fill="none" stroke="#fff" stroke-width="1.6"></rect><path d="M2 3 L11 9.5 L20 3" fill="none" stroke="#fff" stroke-width="1.6"></path></svg>
+    <svg width="20" height="15" viewBox="0 0 20 15"><rect x="0.75" y="0.75" width="18.5" height="13.5" rx="3.5" fill="none" stroke="#fff" stroke-width="1.5"></rect><text x="10" y="11" font-size="9.5" font-weight="700" text-anchor="middle" fill="#fff" font-family="-apple-system, system-ui">12</text></svg>
+    <div style="display: flex; flex-direction: row; gap: 5px; align-items: center; padding: 2px 6px; margin: 0 -6px; border-radius: 4px; background: rgba(255,255,255,0.18);"><span style="color: #fff;">2%</span><svg width="16" height="16" viewBox="0 0 14 14" style="display:block;"><circle cx="7" cy="7" r="5.25" fill="none" stroke="#fff" stroke-opacity="0.3" stroke-width="2.5"></circle><circle cx="7" cy="7" r="5.25" fill="none" stroke="#fff" stroke-width="2.5" stroke-dasharray="0.66 32.987" stroke-linecap="round" transform="rotate(-90 7 7)"></circle></svg></div>
+    <div style="display: flex; flex-direction: row; gap: 5px; align-items: center;"><span>100%</span><svg width="30" height="14" viewBox="0 0 30 14"><rect x="0.75" y="0.75" width="25.5" height="12.5" rx="3.5" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="1.5"></rect><rect x="2.5" y="2.5" width="22" height="9" rx="2" fill="#fff"></rect><path d="M28 5 v4" stroke="#fff" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"></path></svg></div>
+    <span>Sat Sep 12</span><span>1:44</span>
+  </div>
+</div>
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+  <div style="font-size: 12px; color: #6e6e73;">Past 80% used (20% left): red, the way the battery item does it</div>
+  <div style="height: 30px; background: #3b56c8; border-radius: 6px; display: flex; flex-direction: row; justify-content: flex-end; align-items: center; gap: 22px; padding: 0 14px; color: #fff; font-size: 14px;">
+    <svg width="22" height="16" viewBox="0 0 22 16"><rect x="1" y="1" width="20" height="14" rx="2.5" fill="none" stroke="#fff" stroke-width="1.6"></rect><path d="M2 3 L11 9.5 L20 3" fill="none" stroke="#fff" stroke-width="1.6"></path></svg>
+    <svg width="20" height="15" viewBox="0 0 20 15"><rect x="0.75" y="0.75" width="18.5" height="13.5" rx="3.5" fill="none" stroke="#fff" stroke-width="1.5"></rect><text x="10" y="11" font-size="9.5" font-weight="700" text-anchor="middle" fill="#fff" font-family="-apple-system, system-ui">12</text></svg>
+    <div style="display: flex; flex-direction: row; gap: 5px; align-items: center; padding: 2px 6px; margin: 0 -6px; border-radius: 4px; background: rgba(255,255,255,0.18);"><span style="color: #f2a29a;">91%</span><svg width="16" height="16" viewBox="0 0 14 14" style="display:block;"><circle cx="7" cy="7" r="5.25" fill="none" stroke="#f2a29a" stroke-opacity="0.3" stroke-width="2.5"></circle><circle cx="7" cy="7" r="5.25" fill="none" stroke="#f2a29a" stroke-width="2.5" stroke-dasharray="30.018 32.987" stroke-linecap="round" transform="rotate(-90 7 7)"></circle></svg></div>
+    <div style="display: flex; flex-direction: row; gap: 5px; align-items: center;"><span>100%</span><svg width="30" height="14" viewBox="0 0 30 14"><rect x="0.75" y="0.75" width="25.5" height="12.5" rx="3.5" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="1.5"></rect><rect x="2.5" y="2.5" width="22" height="9" rx="2" fill="#fff"></rect><path d="M28 5 v4" stroke="#fff" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"></path></svg></div>
+    <span>Sat Sep 12</span><span>1:44</span>
+  </div>
+</div>
+  <div style="font-size: 12px; color: #6e6e73; line-height: 1.5;">Number first, ring second, the way the battery item sits. The ring is a template image so it tints for light and dark; the colour only kicks in with 20% of the window left. Template images cannot carry colour, so the red state is drawn as a non-template image in the system red for the current appearance.</div>
+</div>
+</x-dc>
+</body>
+</html>

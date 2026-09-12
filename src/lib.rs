@@ -1,0 +1,13 @@
+//! claudebar as a library, so examples and tests can build the views without
+//! going through the menu-bar binary.
+
+#![allow(dead_code)]
+
+pub mod launch_at_login;
+pub mod local;
+pub mod menu_bar_icon;
+pub mod model;
+pub mod status_item;
+pub mod store_provider;
+pub mod ui;
+pub mod usage;

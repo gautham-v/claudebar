@@ -1,0 +1,86 @@
+[package]
+name = "claudebar"
+version = "0.1.0"
+edition = "2021"
+description = "A macOS menu bar app that shows your Claude usage limits"
+license = "MIT"
+repository = "https://github.com/gauthamv/claudebar"
+
+[dependencies]
+gpui = "0.2.2"
+chrono = "0.4"
+futures = "0.3"
+block2 = "0.6"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+# keyring 4 has no feature flags: the Apple keychain store is built in on macOS.
+keyring = "4"
+
+objc2 = "0.6"
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["SMAppService", "std", "objc2", "objc2-foundation"] }
+
+[dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["blocking", "json", "rustls-tls"]
+
+[dependencies.objc2-core-graphics]
+version = "0.3"
+features = ["CGColor", "CGColorSpace", "CGContext", "CGPath"]
+
+[dependencies.objc2-foundation]
+version = "0.3"
+features = [
+    "NSString",
+    "NSGeometry",
+    "NSDate",
+    "NSArray",
+    "NSEnumerator",
+    "NSObjCRuntime",
+    "NSValue",
+    "NSError",
+    "NSURL",
+    "NSNotification",
+    "NSRunLoop",
+    "NSThread",
+    "NSBundle",
+]
+
+[dependencies.objc2-app-kit]
+version = "0.3"
+features = [
+    "NSApplication",
+    "NSResponder",
+    "NSWindow",
+    "NSView",
+    "NSControl",
+    "NSButton",
+    "NSStatusBar",
+    "NSStatusItem",
+    "NSStatusBarButton",
+    "NSImage",
+    "NSScreen",
+    "NSEvent",
+    "NSPanel",
+    "NSRunningApplication",
+    "NSGraphicsContext",
+    "NSCell",
+    "NSFont",
+    "NSColor",
+    "block2",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
+]
+
+[profile.release]
+opt-level = 2
+
+[lib]
+name = "claudebar"
+path = "src/lib.rs"
+
+[[bin]]
+name = "claudebar"
+path = "src/main.rs"

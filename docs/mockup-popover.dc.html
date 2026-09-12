@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; } a:hover { color: inherit; }
+  </style>
+</helmet>
+<div style="width: 400px; height: 620px; box-sizing: border-box; background: #f4f4f5; padding: 28px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start;">
+<div style="font-size: 12px; color: #6e6e73;">Claudebar · popover</div>
+<div style="width: 320px; box-sizing: border-box; background: #f0f0f2; color: #1d1d1f; border-radius: 11px; box-shadow: 0 10px 34px rgba(0,0,0,0.20), 0 0 0 0.5px rgba(0,0,0,0.12); display: flex; flex-direction: column; overflow: hidden; font-size: 13px;">
+  <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; padding: 12px 14px 4px 14px;">
+    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="font-size: 13px; font-weight: 600;">Claude</div><div style="font-size: 12px; color: #6e6e73;">Max</div></div>
+    <div style="width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #6e6e73; font-size: 14px; letter-spacing: 1px;">···</div>
+  </div>
+  <div style="display: flex; flex-direction: row; gap: 8px; padding: 10px 14px 14px 14px;">
+    <div style="display: flex; flex-direction: column; gap: 6px; align-items: center; flex-grow: 1;">
+  <div style="position: relative; width: 56px; height: 56px;">
+    <svg width="56" height="56" viewBox="0 0 56 56" style="display:block;"><circle cx="28" cy="28" r="22" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="6"></circle><circle cx="28" cy="28" r="22" fill="none" stroke="#0a7aff" stroke-width="6" stroke-dasharray="2.765 138.23" stroke-linecap="round" transform="rotate(-90 28 28)"></circle></svg>
+    <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">2%</div>
+  </div>
+  <div style="font-size: 12px; font-weight: 600;">Session</div>
+  <div style="font-size: 11px; color: #6e6e73; text-align: center;">6:29 PM</div>
+</div>
+    <div style="display: flex; flex-direction: column; gap: 6px; align-items: center; flex-grow: 1;">
+  <div style="position: relative; width: 56px; height: 56px;">
+    <svg width="56" height="56" viewBox="0 0 56 56" style="display:block;"><circle cx="28" cy="28" r="22" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="6"></circle><circle cx="28" cy="28" r="22" fill="none" stroke="#0a7aff" stroke-width="6" stroke-dasharray="24.881 138.23" stroke-linecap="round" transform="rotate(-90 28 28)"></circle></svg>
+    <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">18%</div>
+  </div>
+  <div style="font-size: 12px; font-weight: 600;">Week</div>
+  <div style="font-size: 11px; color: #6e6e73; text-align: center;">Wed 7:59 PM</div>
+</div>
+    <div style="display: flex; flex-direction: column; gap: 6px; align-items: center; flex-grow: 1;">
+  <div style="position: relative; width: 56px; height: 56px;">
+    <svg width="56" height="56" viewBox="0 0 56 56" style="display:block;"><circle cx="28" cy="28" r="22" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="6"></circle><circle cx="28" cy="28" r="22" fill="none" stroke="#0a7aff" stroke-width="6" stroke-dasharray="30.411 138.23" stroke-linecap="round" transform="rotate(-90 28 28)"></circle></svg>
+    <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">22%</div>
+  </div>
+  <div style="font-size: 12px; font-weight: 600;">Fable</div>
+  <div style="font-size: 11px; color: #6e6e73; text-align: center;">Wed 7:59 PM</div>
+</div>
+  </div>
+  <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 0 14px;"></div>
+  <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 12px 14px;">
+    <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: baseline;">
+      <div style="font-weight: 600;">Today</div>
+      <div style="font-size: 11px; color: #6e6e73;">Sat, Sep 12</div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+      <div style="display: flex; flex-direction: column; gap: 1px;"><div style="font-size: 15px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">14</div><div style="font-size: 11px; color: #6e6e73;">sessions</div></div>
+      <div style="display: flex; flex-direction: column; gap: 1px;"><div style="font-size: 15px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">412</div><div style="font-size: 11px; color: #6e6e73;">tool calls</div></div>
+      <div style="display: flex; flex-direction: column; gap: 1px;"><div style="font-size: 15px; font-weight: 600; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">1.1B</div><div style="font-size: 11px; color: #6e6e73;">tokens</div></div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 12px;"><div>Fable</div><div style="color: #6e6e73; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">86%</div></div>
+      <div style="height: 6px; border-radius: 3px; background: rgba(0,0,0,0.08); overflow: hidden;"><div style="width: 86%; height: 6px; border-radius: 3px; background: rgba(29,29,31,0.55);"></div></div>
+      <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 12px;"><div>Opus</div><div style="color: #6e6e73; font-family: 'SF Mono', ui-monospace, Menlo, monospace;">13%</div></div>
+      <div style="height: 6px; border-radius: 3px; background: rgba(0,0,0,0.08); overflow: hidden;"><div style="width: 13%; height: 6px; border-radius: 3px; background: rgba(29,29,31,0.55);"></div></div>
+    </div>
+  </div>
+  <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 0 14px;"></div>
+  <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 12px 14px;">
+    <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: baseline;">
+      <div style="font-weight: 600;">Last 7 days</div>
+      <div style="font-size: 11px; color: #6e6e73;">tokens per day</div>
+    </div>
+    <div style="display: flex; flex-direction: row; gap: 3px; align-items: flex-end;"><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 14px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 22px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 9px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 28px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 18px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 6px; border-radius: 2px; background: rgba(10,122,255,0.35);"></div></div><div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 28px;"><div style="height: 20px; border-radius: 2px; background: #0a7aff;"></div></div></div>
+    <div style="display: flex; flex-direction: row; justify-content: space-between; font-size: 10px; color: #aeaeb2;"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>
+  </div>
+  <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 0 14px;"></div>
+  <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; padding: 8px 14px 9px 14px; font-size: 11px; color: #aeaeb2;">
+    <div>Updated 1:37 PM</div>
+    <div style="display: flex; flex-direction: row; gap: 12px;"><div style="color: #0a7aff;">Refresh</div><div style="color: #0a7aff;">Open claude.ai</div></div>
+  </div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>
