@@ -13,8 +13,8 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSColor, NSControl, NSEvent,
-    NSEventMask, NSFont, NSForegroundColorAttributeName, NSScreen, NSStatusBar, NSStatusBarButton,
-    NSStatusItem, NSVariableStatusItemLength,
+    NSEventMask, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSScreen,
+    NSStatusBar, NSStatusBarButton, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{NSAttributedString, NSDictionary, NSPoint, NSRect, NSString};
 
@@ -166,11 +166,6 @@ impl StatusItem {
                 // pair instead of pushing the image to the button's far edge.
                 button.setImagePosition(NSCellImagePosition::ImageTrailing);
                 button.setImageHugsTitle(true);
-                // The menu bar's own text metric, so the number matches the
-                // system items next to it rather than the default control font.
-                let font = NSFont::menuBarFontOfSize(0.0);
-                button.setFont(Some(&font));
-
                 let control: &NSControl = &button;
                 control.setTarget(Some(&*target));
                 control.setAction(Some(sel!(claudebarStatusItemClicked:)));
@@ -222,19 +217,15 @@ impl StatusItem {
 
 /// Push a state onto the button: the number, the ring, and the fade.
 ///
-/// The low state is the only one that needs an attributed title — AppKit has no
-/// plain "title colour" on a status item button, so the red number is a
-/// `NSForegroundColorAttributeName` run. Setting a plain title afterwards is
-/// what clears it again; the two titles are separate properties and the
-/// attributed one wins whenever it is set.
+/// The title is always an attributed string, never a plain one: a plain title
+/// on a status item picks up AppKit's default 13pt control font, which sits
+/// visibly larger than the battery percentage next door, and a plain title set
+/// after an attributed one does not reliably take the button's font back. One
+/// path, with the font spelled out every time, is what keeps the number the
+/// same size in every state.
 fn apply_state(button: &NSStatusBarButton, state: MenuBarState) {
     let title = spaced_title(&state.title());
-    if state.low() {
-        button.setAttributedTitle(&red_title(&title));
-    } else {
-        button.setAttributedTitle(&NSAttributedString::new());
-        button.setTitle(&NSString::from_str(&title));
-    }
+    button.setAttributedTitle(&styled_title(&title, state.low()));
     button.setImage(Some(&menu_bar_icon::ring_image(
         state.ring_percent(),
         state.low(),
@@ -242,18 +233,36 @@ fn apply_state(button: &NSStatusBarButton, state: MenuBarState) {
     button.setAppearsDisabled(state.dimmed());
 }
 
-/// The title drawn in the system red, matching the ring in the low state. The
-/// colour comes from `NSColor` rather than a literal so it tracks the menu bar
-/// appearance and the user's accessibility settings.
-fn red_title(title: &str) -> Retained<NSAttributedString> {
+/// The point size of the percentage. The menu bar's own font is 13pt, but the
+/// system's battery percentage is set a step smaller, and this item sits right
+/// beside it.
+const TITLE_POINT_SIZE: f64 = 12.0;
+
+/// The title in the battery item's size, and in the system red when `low` so
+/// it matches the ring. The colour comes from `NSColor` rather than a literal so
+/// it tracks the menu bar appearance and the user's accessibility settings; a
+/// non-low title carries no colour attribute at all, leaving the menu bar to
+/// tint it like any other item.
+fn styled_title(title: &str, low: bool) -> Retained<NSAttributedString> {
+    let font = NSFont::menuBarFontOfSize(TITLE_POINT_SIZE);
     let red = NSColor::systemRedColor();
-    // Safety: `NSForegroundColorAttributeName` documents its value as an
-    // `NSColor`, which is what we pass.
+    // Safety: `NSFontAttributeName` documents its value as an `NSFont` and
+    // `NSForegroundColorAttributeName` as an `NSColor`, which is what we pass.
     unsafe {
-        let attrs = NSDictionary::from_slices(
-            &[NSForegroundColorAttributeName],
-            &[&*red as &objc2::runtime::AnyObject],
-        );
+        let attrs = if low {
+            NSDictionary::from_slices(
+                &[NSFontAttributeName, NSForegroundColorAttributeName],
+                &[
+                    &*font as &objc2::runtime::AnyObject,
+                    &*red as &objc2::runtime::AnyObject,
+                ],
+            )
+        } else {
+            NSDictionary::from_slices(
+                &[NSFontAttributeName],
+                &[&*font as &objc2::runtime::AnyObject],
+            )
+        };
         NSAttributedString::new_with_attributes(&NSString::from_str(title), &attrs)
     }
 }

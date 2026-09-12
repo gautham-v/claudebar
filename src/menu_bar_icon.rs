@@ -18,13 +18,15 @@ use objc2_app_kit::{NSColor, NSGraphicsContext, NSImage};
 use objc2_core_graphics::{CGContext, CGLineCap};
 use objc2_foundation::{NSRect, NSSize};
 
-/// Glyph box, in points. Square, and a touch smaller than the menu bar's 22pt
-/// height so the ring reads as an icon rather than filling the bar.
-pub const SIZE: f64 = 16.0;
+/// Glyph box, in points. Square, and sized to the optical height of the
+/// system glyphs beside it (the envelope and calendar outlines of its siblings
+/// are 13pt tall) rather than the full 22pt of the bar.
+pub const SIZE: f64 = 15.0;
 
-/// Ring stroke, in points. Thick enough that the arc is legible at 1x, thin
-/// enough that a 1% arc is still a dot on the circle rather than a blob.
-pub const STROKE: f64 = 2.5;
+/// Ring stroke, in points. The same weight as the calendar outline next door,
+/// so the ring reads as one more line icon rather than a gauge; a 1% arc is
+/// still a dot on the circle rather than a blob.
+pub const STROKE: f64 = 1.5;
 
 /// How visible the unfilled part of the ring is. The track has to read as the
 /// "rest of the circle" without competing with the arc.
