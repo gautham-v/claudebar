@@ -21,7 +21,8 @@ It follows the system light/dark appearance.
 
 ![the claudebar popover: a bar per limit, today's totals, the last seven days and the menu rows](docs/screenshot.png)
 
-<!-- Captured from `cargo run --example popover_preview` (stub data, no token). -->
+<!-- Captured from the running app (real numbers). `cargo run --example popover_preview` renders
+     the same view over stub data if you want to retake it without a token. -->
 
 ## Build and run
 
