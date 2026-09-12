@@ -23,10 +23,11 @@ use objc2_foundation::{NSRect, NSSize};
 /// 13pt tall, and a ring any taller reads as bigger than the battery.
 pub const SIZE: f64 = 13.0;
 
-/// Ring stroke, in points. The same weight as the calendar outline next door,
-/// so the ring reads as one more line icon rather than a gauge; a 1% arc is
-/// still a dot on the circle rather than a blob.
-pub const STROKE: f64 = 1.4;
+/// Ring stroke, in points. A touch heavier than the calendar outline next
+/// door: at the same weight the ring looked wispy beside the battery's solid
+/// fill, and this is still thin enough that a 1% arc is a dot on the circle
+/// rather than a blob.
+pub const STROKE: f64 = 1.8;
 
 /// How visible the unfilled part of the ring is. The track has to read as the
 /// "rest of the circle" without competing with the arc.
