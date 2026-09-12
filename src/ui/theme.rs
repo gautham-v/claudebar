@@ -88,12 +88,12 @@ pub const DARK: Theme = Theme {
     hover: hex_a(0xffffff, 0.10),
 };
 
-/// How opaque the popover material is. A translucent value over a
-/// [`Blurred`](gpui::WindowBackgroundAppearance::Blurred) window gives real
-/// vibrancy — the mockup's `0.80` — but gpui's blur is not a system
-/// `NSVisualEffectView`, so it is kept opaque until someone has looked at it on
-/// a live screen. Lower this and switch `main.rs` back to `Blurred` to try.
-pub const BG_ALPHA: f32 = 1.0;
+/// How opaque the popover material is. Over a
+/// [`Blurred`](gpui::WindowBackgroundAppearance::Blurred) window this is what
+/// gives the popover the translucent look of a system menu: what is behind it
+/// shows through as a soft wash, and the text stays fully legible. Checked on
+/// a live screen against the Battery menu; `1.0` is the opaque fallback.
+pub const BG_ALPHA: f32 = 0.80;
 
 impl Default for Theme {
     fn default() -> Self {
@@ -227,9 +227,9 @@ mod tests {
     fn light_background_is_the_mockup_material() {
         assert_eq!((LIGHT.bg.r * 255.0).round() as u32, 246);
         assert_eq!((DARK.bg.b * 255.0).round() as u32, 42);
-        // Opaque: see BG_ALPHA for why the mockup's 0.80 is not in use.
-        assert!((LIGHT.bg.a - 1.0).abs() < 1e-6);
-        assert!((DARK.bg.a - 1.0).abs() < 1e-6);
+        // Translucent over a blurred window: see BG_ALPHA.
+        assert!((LIGHT.bg.a - 0.80).abs() < 1e-6);
+        assert!((DARK.bg.a - 0.80).abs() < 1e-6);
     }
 
     #[test]
