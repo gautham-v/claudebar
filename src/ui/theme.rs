@@ -56,14 +56,23 @@ pub struct Theme {
 
 /// Light appearance (the mockup's own palette).
 pub const LIGHT: Theme = Theme {
+    // Sampled off the Battery menu on a live screen: its material lands at
+    // about (238, 237, 239) over a light page, which this grey at
+    // `BG_ALPHA` reproduces. The plain white of the first mockup read as a
+    // card, not a menu.
     bg: Rgba {
-        r: 246.0 / 255.0,
-        g: 246.0 / 255.0,
-        b: 246.0 / 255.0,
+        r: 236.0 / 255.0,
+        g: 236.0 / 255.0,
+        b: 238.0 / 255.0,
         a: BG_ALPHA,
     },
-    border: hex_a(0x000000, 0.14),
-    text: hex(0x1d1d1f),
+    // The system menu has no visible hairline of its own, only the shadow's
+    // edge; a faint rim is all that keeps the corners crisp against a busy
+    // desktop.
+    border: hex_a(0x000000, 0.06),
+    // System label colour: black at 85%, so text sits in the material rather
+    // than on top of it.
+    text: hex_a(0x000000, 0.85),
     secondary: hex(0x6e6e73),
     tertiary: hex(0xaeaeb2),
     separator: hex_a(0x000000, 0.09),
@@ -79,8 +88,8 @@ pub const DARK: Theme = Theme {
         b: 42.0 / 255.0,
         a: BG_ALPHA,
     },
-    border: hex_a(0xffffff, 0.14),
-    text: hex(0xf5f5f7),
+    border: hex_a(0xffffff, 0.10),
+    text: hex_a(0xffffff, 0.85),
     secondary: hex(0x98989d),
     tertiary: hex(0x8e8e93),
     separator: hex_a(0xffffff, 0.12),
@@ -93,7 +102,7 @@ pub const DARK: Theme = Theme {
 /// gives the popover the translucent look of a system menu: what is behind it
 /// shows through as a soft wash, and the text stays fully legible. Checked on
 /// a live screen against the Battery menu; `1.0` is the opaque fallback.
-pub const BG_ALPHA: f32 = 0.80;
+pub const BG_ALPHA: f32 = 0.85;
 
 impl Default for Theme {
     fn default() -> Self {
@@ -138,8 +147,10 @@ pub const SPARK_PAST_ALPHA: f32 = 0.18;
 pub const POPOVER_WIDTH: Pixels = px(260.);
 /// Corner radius of the popover.
 pub const POPOVER_RADIUS: Pixels = px(10.);
-/// Gap between the menu bar and the top of the popover.
-pub const POPOVER_TOP_GAP: Pixels = px(6.);
+/// Gap between the menu bar and the top of the popover. Zero: the system
+/// menus hang straight off the bar's bottom edge, and a gap reads as a
+/// floating window rather than a menu.
+pub const POPOVER_TOP_GAP: Pixels = px(0.);
 /// The menu inset: the padding between the popover's edge and its rows, as a
 /// plain float so the layout constants that add it up stay `const`.
 pub const POPOVER_PAD_PX: f32 = 5.0;
@@ -224,12 +235,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn light_background_is_the_mockup_material() {
-        assert_eq!((LIGHT.bg.r * 255.0).round() as u32, 246);
+    fn light_background_is_the_system_menu_material() {
+        assert_eq!((LIGHT.bg.r * 255.0).round() as u32, 236);
         assert_eq!((DARK.bg.b * 255.0).round() as u32, 42);
         // Translucent over a blurred window: see BG_ALPHA.
-        assert!((LIGHT.bg.a - 0.80).abs() < 1e-6);
-        assert!((DARK.bg.a - 0.80).abs() < 1e-6);
+        assert!((LIGHT.bg.a - BG_ALPHA).abs() < 1e-6);
+        assert!((DARK.bg.a - BG_ALPHA).abs() < 1e-6);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! helpers; nothing here touches the network, the Keychain or the disk.
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
 
 /// How little of a window has to be left before it is drawn in red, by
 /// default — the same rule as the battery item, which goes red with 20% left.
@@ -9,7 +10,7 @@ use chrono::{DateTime, Local, NaiveDate, Utc};
 pub const LOW_REMAINING_PERCENT: f32 = 20.0;
 
 /// Which limit a ring stands for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LimitKind {
     /// The rolling 5-hour session window. This is what the menu bar shows.
     Session,
@@ -20,7 +21,7 @@ pub enum LimitKind {
 }
 
 /// One rate limit as the API reports it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Limit {
     pub kind: LimitKind,
     /// 0..=100, how much of the window has been used.
@@ -66,8 +67,10 @@ impl Limit {
     }
 }
 
-/// A fetched snapshot of the account's limits.
-#[derive(Debug, Clone, PartialEq)]
+/// A fetched snapshot of the account's limits. Serialisable because the last
+/// good one is kept on disk (see `crate::cache`) so a relaunch has numbers to
+/// show before its first fetch lands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// In display order: session, weekly, then any model-scoped limits.
     pub limits: Vec<Limit>,

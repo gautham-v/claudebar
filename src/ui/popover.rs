@@ -330,8 +330,12 @@ impl Popover {
             .pb(px(LIMITS_PAD_BOTTOM));
 
         if limits.is_empty() {
+            // Under an error the notice line already says what happened;
+            // "checking" would be untrue.
             let line = if self.signed_out() {
                 SIGNED_OUT_LINE
+            } else if matches!(self.provider.state(), ProviderState::Error(_)) {
+                NO_NUMBERS_LINE
             } else {
                 LOADING_LINE
             };
@@ -585,7 +589,9 @@ pub fn section_header(label: &'static str) -> impl IntoElement {
         .px(theme::ROW_PAD_X)
         .pt(px(SECTION_HEADER_PAD_TOP))
         .pb(px(SECTION_HEADER_PAD_BOTTOM))
-        .font_weight(FontWeight::SEMIBOLD)
+        // Bold, not semibold: the Battery menu's "Battery" is set in the
+        // system bold, and semibold beside it looks washed out.
+        .font_weight(FontWeight::BOLD)
         .text_size(theme::TEXT_TITLE)
         .line_height(theme::LINE_TITLE)
         .child(label)
@@ -649,6 +655,7 @@ const NOTE_HEIGHT: f32 = theme::LINE_MICRO_PX + NOTE_PAD_BOTTOM;
 /// fetch is still out.
 const SIGNED_OUT_LINE: &str = "Sign in with `claude` in a terminal first";
 const LOADING_LINE: &str = "Checking your limits…";
+const NO_NUMBERS_LINE: &str = "No numbers yet";
 
 impl EventEmitter<PopoverEvent> for Popover {}
 

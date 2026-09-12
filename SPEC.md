@@ -59,7 +59,11 @@ Two sources, both already on the machine. No account of its own; one optional co
    Errors, phrased for the popover's muted line: no Keychain item → `ProviderState::SignedOut`
    ("Sign in with `claude` first"); token expired per `expiresAt` or a 401 → error
    "Token expired — run `claude` to refresh"; network → "Offline". Never refresh the token
-   ourselves; Claude Code owns it. Poll every 5 minutes and whenever the popover opens.
+   ourselves; Claude Code owns it. Poll every 5 minutes and whenever the popover opens, but never
+   more than once a minute: the endpoint answers 429 when asked too often, which maps to
+   `UsageError::RateLimited` ("Rate limited — will retry") and keeps the last good snapshot. That
+   snapshot is also written to `~/Library/Caches/claudebar/usage.json` (`src/cache.rs`) and read
+   back at launch, so the menu bar has a percentage before the first fetch lands.
 2. **Today / last 7 days** — walk `~/.claude/projects/*/*.jsonl`. Each line is JSON; the lines
    that matter have `"type":"assistant"` with `timestamp` (RFC 3339, UTC), `sessionId`,
    `requestId`, and `message.{id, model, usage{input_tokens, output_tokens,

@@ -131,8 +131,14 @@ asking.
 claudebar makes exactly one network request: the usage endpoint above, with the token Claude
 Code already stores. It does not refresh, rewrite or export that token, and it writes no
 credentials of its own. Your session logs are parsed locally and the numbers derived from them
-never leave the machine. There is no telemetry and no analytics. The only file claudebar writes is
-`~/.config/claudebar/config.toml`, which holds the display settings above and nothing else.
+never leave the machine. There is no telemetry and no analytics. claudebar writes two files of its
+own: `~/.config/claudebar/config.toml`, which holds the display settings above, and
+`~/Library/Caches/claudebar/usage.json`, the last limits it fetched (percentages and reset times,
+never the token) so a relaunch has numbers to show before its first fetch lands.
+
+The usage endpoint rate-limits. claudebar asks at most once a minute however often the popover is
+opened, and when the API answers 429 it keeps the previous numbers up with a "Rate limited — will
+retry" line until the next scheduled fetch.
 
 ## How it fits together
 

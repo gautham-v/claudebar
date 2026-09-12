@@ -11,6 +11,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+/// The least time between two usage fetches. The endpoint rate-limits, and
+/// opening the popover a few times in a minute is not a reason to ask again.
+const MIN_FETCH_GAP: std::time::Duration = std::time::Duration::from_secs(60);
 
 use chrono::{DateTime, Local};
 use gpui::AsyncApp;
@@ -45,6 +50,10 @@ pub struct StoreProvider {
     on_change: RefCell<Option<OnChange>>,
     /// A fetch is already out; a second popover open should not start another.
     fetching: Arc<Mutex<bool>>,
+    /// When the last fetch was started. Every popover open asks for a
+    /// refresh, and the usage endpoint answers 429 when asked too often, so
+    /// opens closer together than [`MIN_FETCH_GAP`] reuse the snapshot.
+    last_fetch: Arc<Mutex<Option<Instant>>>,
     /// The user's choices, read once at construction and rewritten whenever
     /// the "···" menu changes one.
     settings: RefCell<Settings>,
@@ -61,11 +70,19 @@ impl StoreProvider {
     /// bar title included — needs it before the first fetch lands.
     pub fn new(cx: &AsyncApp) -> Self {
         let (settings, note) = Settings::load();
+        // Start from the last good numbers, so the menu bar has a percentage
+        // to show before the first fetch lands. The state stays unset: this is
+        // still "loading" as far as the notice line is concerned.
+        let snapshot = Snapshot {
+            usage: crate::cache::load(),
+            ..Snapshot::default()
+        };
         Self {
-            snapshot: Arc::new(Mutex::new(Snapshot::default())),
+            snapshot: Arc::new(Mutex::new(snapshot)),
             cx: cx.clone(),
             on_change: RefCell::new(None),
             fetching: Arc::new(Mutex::new(false)),
+            last_fetch: Arc::new(Mutex::new(None)),
             settings: RefCell::new(settings),
             settings_note: RefCell::new(note),
         }
@@ -103,6 +120,11 @@ impl StoreProvider {
             if *fetching {
                 return;
             }
+            let mut last = self.last_fetch.lock().unwrap();
+            if last.is_some_and(|at| at.elapsed() < MIN_FETCH_GAP) {
+                return;
+            }
+            *last = Some(Instant::now());
             *fetching = true;
         }
         let snapshot = self.snapshot.clone();
@@ -118,6 +140,7 @@ impl StoreProvider {
                         snapshot.local = Some(scanned);
                         match limits {
                             Ok(usage) => {
+                                crate::cache::save(&usage);
                                 snapshot.usage = Some(usage);
                                 snapshot.state = Some(ProviderState::Ready);
                             }

@@ -41,6 +41,9 @@ pub enum UsageError {
     TokenExpired,
     /// The request never reached the API (DNS, timeout, no route).
     Offline(String),
+    /// The API answered 429: we asked too often. The last good numbers stay
+    /// up and the next scheduled fetch tries again.
+    RateLimited,
     /// The API answered with something we could not use.
     Bad(String),
 }
@@ -52,6 +55,7 @@ impl UsageError {
             UsageError::SignedOut => "Sign in with `claude` first".to_string(),
             UsageError::TokenExpired => "Token expired — run `claude` to refresh".to_string(),
             UsageError::Offline(_) => "Offline".to_string(),
+            UsageError::RateLimited => "Rate limited — will retry".to_string(),
             UsageError::Bad(detail) => detail.clone(),
         }
     }
@@ -169,6 +173,9 @@ fn request(access_token: &str) -> Result<String, UsageError> {
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(UsageError::TokenExpired);
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(UsageError::RateLimited);
     }
     if !status.is_success() {
         return Err(UsageError::Bad(format!("The API answered {}", status)));
