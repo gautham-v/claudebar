@@ -16,6 +16,9 @@ jobs:
       version: ${{ steps.package.outputs.version }}
     permissions:
       contents: write
+    # `secrets` cannot be read from a step's `if`; job env can.
+    env:
+      HAVE_DEVELOPER_ID: ${{ secrets.DEVELOPER_ID_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +52,7 @@ jobs:
       # "Open Anyway" dance the cask caveats describe.
       - name: Import the Developer ID certificate
         id: cert
-        if: ${{ secrets.DEVELOPER_ID_P12 != '' }}
+        if: env.HAVE_DEVELOPER_ID == 'true'
         env:
           DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
