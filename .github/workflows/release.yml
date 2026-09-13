@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  app:
+    name: Universal Claudebar.app
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain and both macOS targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-release-
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      # One binary for both Macs, then the same bundle script `make install`
+      # uses. The runner has no signing identity, so the script signs ad hoc.
+      - name: Bundle and zip
+        id: package
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          mkdir -p dist
+          lipo -create -output dist/claudebar \
+            target/aarch64-apple-darwin/release/claudebar \
+            target/x86_64-apple-darwin/release/claudebar
+          lipo -info dist/claudebar
+          CLAUDEBAR_BIN="$PWD/dist/claudebar" ./scripts/bundle.sh
+          codesign --verify --verbose target/Claudebar.app
+          ditto -c -k --keepParent target/Claudebar.app "dist/Claudebar-${version}.zip"
+          shasum -a 256 "dist/Claudebar-${version}.zip" | tee "dist/Claudebar-${version}.zip.sha256"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Claudebar-${{ steps.package.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+      # Only a pushed tag publishes. A manual run builds the artifact and stops.
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "claudebar ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            "dist/Claudebar-${{ steps.package.outputs.version }}.zip" \
+            "dist/Claudebar-${{ steps.package.outputs.version }}.zip.sha256"
+
+  # The tap: packaging/claudebar.rb with this release's version and checksum,
+  # pushed to gautham-v/homebrew-tap as Casks/claudebar.rb. Needs TAP_TOKEN, a
+  # fine-grained PAT with contents: write on the tap repository only.
+  tap:
+    name: Update the Homebrew tap
+    needs: app
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the checksum
+        uses: actions/download-artifact@v4
+        with:
+          name: Claudebar-${{ needs.app.outputs.version }}
+          path: dist
+
+      - name: Write the cask
+        run: |
+          set -euo pipefail
+          version="${{ needs.app.outputs.version }}"
+          sha="$(cut -d' ' -f1 dist/*.sha256)"
+          sed -e "s/^  version \"[^\"]*\"/  version \"${version}\"/" \
+              -e "s/^  sha256 \"[0-9a-f]*\"/  sha256 \"${sha}\"/" \
+              packaging/claudebar.rb > claudebar.rb
+          grep -E '^  (version|sha256) ' claudebar.rb
+
+      - name: Push it to the tap
+        env:
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::TAP_TOKEN is not set; add a fine-grained PAT with contents: write on gautham-v/homebrew-tap"
+            exit 1
+          fi
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/gautham-v/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          cp claudebar.rb tap/Casks/claudebar.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/claudebar.rb
+          git diff --cached --quiet && { echo "tap already at ${{ needs.app.outputs.version }}"; exit 0; }
+          git commit -m "claudebar ${{ needs.app.outputs.version }}"
+          git push

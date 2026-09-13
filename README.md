@@ -11,14 +11,23 @@ seven days. No account, no config, no Dock icon.
 
 ## Install
 
-Needs Rust and Xcode.
+```sh
+brew install --cask gautham-v/tap/claudebar
+```
+
+The build is signed ad hoc, not notarized, so the first launch needs **System Settings →
+Privacy & Security → Open Anyway** (or `xattr -dr com.apple.quarantine /Applications/Claudebar.app`).
+Then turn on **Launch at login** from the popover. The same `Claudebar-<version>.zip` is on the
+[releases page](https://github.com/gautham-v/claudebar/releases) if you would rather skip Homebrew.
+
+From source, with Rust and Xcode installed:
 
 ```sh
 make install   # builds Claudebar.app, copies it to /Applications, launches it
 ```
 
-Then turn on **Launch at login** from the popover. `make run` builds and launches from `target/`
-instead; `cargo run --example popover_preview` shows the popover over stub data.
+`make run` builds and launches from `target/` instead; `cargo run --example popover_preview`
+shows the popover over stub data.
 
 ## Settings
 

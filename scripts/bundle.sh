@@ -12,16 +12,21 @@ TARGET_DIR="$(cargo metadata --no-deps --format-version 1 --manifest-path "$ROOT
 TARGET_DIR="${TARGET_DIR:-$ROOT/target}"
 
 APP="$TARGET_DIR/Claudebar.app"
-BIN="$TARGET_DIR/release/claudebar"
+# CLAUDEBAR_BIN points at a prebuilt binary (the release workflow passes the
+# universal one); otherwise build for this machine.
+BIN="${CLAUDEBAR_BIN:-$TARGET_DIR/release/claudebar}"
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -n 1)"
 
-cargo build --release --manifest-path "$ROOT/Cargo.toml"
+if [ -z "${CLAUDEBAR_BIN:-}" ]; then
+  cargo build --release --manifest-path "$ROOT/Cargo.toml"
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/claudebar"
 cp "$ROOT/assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -41,7 +46,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>${VERSION}</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
