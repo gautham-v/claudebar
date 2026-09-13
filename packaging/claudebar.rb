@@ -15,7 +15,7 @@ cask "claudebar" do
   homepage "https://github.com/gautham-v/claudebar"
 
   # SMAppService, which launch-at-login uses, is macOS 13+.
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Claudebar.app"
 
