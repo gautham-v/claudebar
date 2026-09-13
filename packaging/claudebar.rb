@@ -19,19 +19,8 @@ cask "claudebar" do
 
   app "Claudebar.app"
 
-  # The build is not notarized, so Gatekeeper refuses the first launch.
   caveats <<~EOS
-    The app is signed ad hoc, not notarized. On first launch macOS will say it
-    cannot verify the developer. Open it anyway with:
-
-      System Settings → Privacy & Security → Open Anyway
-
-    or clear the quarantine flag and launch it:
-
-      xattr -dr com.apple.quarantine /Applications/Claudebar.app
-      open /Applications/Claudebar.app
-
-    Then turn on "Launch at login" from the popover.
+    Turn on "Launch at login" from the popover if you want it.
   EOS
 
   uninstall quit: "com.gauthamv.claudebar"
