@@ -65,8 +65,10 @@ PLIST
 # on every single launch. Override with CODESIGN_IDENTITY.
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
-  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | sed -n 's/.*"\(.*\)"/\1/p' | head -n 1)"
+  # Prefer Developer ID, which Gatekeeper trusts, over an Xcode development
+  # certificate, which it does not.
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(.*\)"/\1/p')"
+  IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep -m1 '^Developer ID Application' || printf '%s\n' "$IDENTITIES" | head -n 1)"
 fi
 if [ -n "$IDENTITY" ]; then
   codesign --force --options runtime --sign "$IDENTITY" "$APP" \
