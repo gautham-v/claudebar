@@ -2,7 +2,7 @@
 
 A macOS menu bar app that shows your Claude usage limits. Click the item, a popover drops down
 with a bar per limit (session, week, model) and what you did today, read from the local Claude
-Code session logs. Built with GPUI (Rust). Sibling of daybar and mailbar: same stack, same visual
+Code session logs. Built with GPUI (Rust). Sibling of daybar: same stack, same visual
 language, same repo layout. MIT, open source.
 
 ## Reference
@@ -133,14 +133,14 @@ rustls), serde/serde_json, keyring, dirs.
 
 ## Repo layout
 - `src/main.rs` — app entry, activation policy, status item, popover window management (copy
-  mailbar's shape: `StatusItem` click channel, `PopUp` window under the item, resize on notify)
+  daybar's shape: `StatusItem` click channel, `PopUp` window under the item, resize on notify)
 - `src/model.rs` — `Usage`, `Limit`, `DayStats`, `LocalStats` (pure, unit-tested)
 - `src/settings.rs` — the config file and its defaults (pure, unit-tested)
 - `src/usage.rs` — Keychain read + the usage request + parsing (parsing unit-tested on the
   JSON above)
 - `src/local.rs` — the session-log scan (unit-tested on a fixture written to a temp dir)
 - `src/store_provider.rs` — `UsageProvider` over the two, with the background-executor +
-  on-change hook pattern from mailbar
+  on-change hook pattern from daybar
 - `src/menu_bar_icon.rs` — the ring image; `src/status_item.rs` — Cocoa glue
 - `src/ui/` — `popover.rs` root view, `stats.rs`, `provider.rs`, `theme.rs`
 - `examples/popover_preview.rs` — the popover in a normal window over `StubProvider`;
@@ -150,5 +150,5 @@ rustls), serde/serde_json, keyring, dirs.
   `make test`, `make check` (fmt + clippy `-D warnings`)
 
 ## Style
-Comments explain why, in full sentences, the way daybar and mailbar do. No literal colours or
+Comments explain why, in full sentences, the way daybar does. No literal colours or
 sizes in views. `cargo fmt`, clippy clean.

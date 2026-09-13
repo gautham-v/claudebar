@@ -1,7 +1,7 @@
 # claudebar
 
 Your Claude usage limits in the macOS menu bar. Rust + [GPUI](https://www.gpui.rs/), sibling of
-[daybar](https://github.com/gautham-v/daybar) and [mailbar](https://github.com/gautham-v/mailbar).
+[daybar](https://github.com/gautham-v/daybar).
 
 <img src="docs/screenshot.png" width="480" alt="claudebar: the menu bar item and its popover">
 
