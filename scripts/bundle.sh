@@ -71,8 +71,9 @@ if [ -z "$IDENTITY" ]; then
   IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep -m1 '^Developer ID Application' || printf '%s\n' "$IDENTITIES" | head -n 1)"
 fi
 if [ -n "$IDENTITY" ]; then
-  codesign --force --options runtime --sign "$IDENTITY" "$APP" \
-    || echo "warning: codesign with '$IDENTITY' failed; the Keychain item may not stick"
+  # Fail rather than warn: an unsigned build launched from /Applications is a
+  # new app to every Keychain grant.
+  codesign --force --options runtime --sign "$IDENTITY" "$APP"
 else
   echo "note: no codesigning identity found; signing ad-hoc, so macOS will re-prompt on every rebuild"
   codesign --force --sign - "$APP" 2>/dev/null \

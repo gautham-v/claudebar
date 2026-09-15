@@ -1,4 +1,5 @@
-//! The limits layer: the Claude Code OAuth token out of the login Keychain,
+//! The limits layer: the Claude Code OAuth token out of the login Keychain
+//! (via `/usr/bin/security`),
 //! one `GET /api/oauth/usage` against the Anthropic API, and the parse into
 //! [`crate::model::Usage`].
 //!
@@ -125,18 +126,56 @@ fn keychain_username() -> Option<String> {
     Some(home.file_name()?.to_string_lossy().into_owned())
 }
 
+/// `security find-generic-password` exit status when the item does not exist
+/// (`errSecItemNotFound`).
+const SECURITY_NOT_FOUND: i32 = 44;
+
+/// Read the credential blob out of the login Keychain.
+///
+/// This deliberately shells out to `/usr/bin/security` instead of calling the
+/// Keychain API directly. Claude Code writes the item with that same tool, and
+/// every time it refreshes the token (roughly every few hours) macOS resets
+/// the item's partition list to `apple-tool:`, wiping the "Always Allow" the
+/// user granted our bundle. A direct API read therefore re-prompts for the
+/// login password after every refresh. Apple's own tool is in the surviving
+/// partition, so reading through it never prompts.
+fn read_keychain_blob(username: &str) -> Result<String, UsageError> {
+    let output = std::process::Command::new("/usr/bin/security")
+        .args([
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            username,
+            "-w",
+        ])
+        .output()
+        .map_err(|e| UsageError::Bad(format!("running `security` failed: {e}")))?;
+    match output.status.code() {
+        Some(0) => {}
+        Some(SECURITY_NOT_FOUND) => return Err(UsageError::SignedOut),
+        Some(code) => {
+            return Err(UsageError::Bad(format!(
+                "reading the Keychain failed (security exit {code})"
+            )))
+        }
+        None => {
+            return Err(UsageError::Bad(
+                "reading the Keychain failed (security killed)".into(),
+            ))
+        }
+    }
+    let secret = String::from_utf8(output.stdout)
+        .map_err(|_| UsageError::Bad("the Claude Code credential is not UTF-8".into()))?;
+    Ok(secret.trim_end_matches(['\n', '\r']).to_string())
+}
+
 /// Read and validate the stored credential. A missing item means signed out; a
 /// past `expiresAt` means the user has to run `claude` again.
 fn read_token() -> Result<Token, UsageError> {
     let username = keychain_username()
         .ok_or_else(|| UsageError::Bad("no macOS user name to look up".into()))?;
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &username)
-        .map_err(|e| UsageError::Bad(format!("opening the Keychain failed: {e}")))?;
-    let secret = match entry.get_password() {
-        Ok(secret) => secret,
-        Err(keyring::Error::NoEntry) => return Err(UsageError::SignedOut),
-        Err(e) => return Err(UsageError::Bad(format!("reading the Keychain failed: {e}"))),
-    };
+    let secret = read_keychain_blob(&username)?;
 
     // The blob is JSON, but never say what was in it: it holds the token.
     let credentials: Credentials = serde_json::from_str(&secret)

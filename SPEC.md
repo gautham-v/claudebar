@@ -45,7 +45,7 @@ Two sources, both already on the machine. No account of its own; one optional co
    `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. The token is the
    Claude Code OAuth token in the login Keychain: service `Claude Code-credentials`, account =
    the macOS username; the secret is JSON `{"claudeAiOauth": {"accessToken", "expiresAt" (ms),
-   "subscriptionType" ("max"/"pro"), ...}}`. Read it with the `keyring` crate (already a dep).
+   "subscriptionType" ("max"/"pro"), ...}}`. Read it by running `/usr/bin/security find-generic-password -w`, the same tool Claude Code writes it with, so the read survives token refreshes without a Keychain prompt.
    Response shape (fields we use):
    ```json
    {"five_hour": {"utilization": 2.0, "resets_at": "2026-09-12T22:29:59.705239+00:00"},
@@ -129,7 +129,7 @@ colour in the surface, and only on a limit bar that `is_low`. Top to bottom:
 
 ## Crates
 gpui 0.2, objc2 0.6 family (objc2-foundation, objc2-app-kit), chrono, reqwest (blocking,
-rustls), serde/serde_json, keyring, dirs.
+rustls), serde/serde_json, dirs.
 
 ## Repo layout
 - `src/main.rs` — app entry, activation policy, status item, popover window management (copy

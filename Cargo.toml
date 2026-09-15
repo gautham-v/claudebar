@@ -1,6 +1,6 @@
 [package]
 name = "claudebar"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A macOS menu bar app that shows your Claude usage limits"
 license = "MIT"
@@ -16,8 +16,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 dirs = "5"
-# keyring 4 has no feature flags: the Apple keychain store is built in on macOS.
-keyring = "4"
 
 objc2 = "0.6"
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["SMAppService", "std", "objc2", "objc2-foundation"] }
