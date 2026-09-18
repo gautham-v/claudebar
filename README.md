@@ -20,6 +20,12 @@ Then turn on **Launch at login** from the popover. The build is signed and notar
 `Claudebar-<version>.zip` is on the [releases page](https://github.com/gautham-v/claudebar/releases)
 if you would rather skip Homebrew.
 
+To upgrade, run this, then quit and relaunch Claudebar:
+
+```sh
+brew upgrade --cask gautham-v/tap/claudebar
+```
+
 From source, with Rust and Xcode installed:
 
 ```sh
