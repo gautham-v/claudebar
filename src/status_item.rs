@@ -12,80 +12,57 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSColor, NSControl, NSEvent,
-    NSEventMask, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSScreen,
-    NSStatusBar, NSStatusBarButton, NSStatusItem, NSVariableStatusItemLength,
+    NSAppearanceCustomization, NSApplication, NSApplicationActivationPolicy, NSCellImagePosition,
+    NSControl, NSEvent, NSEventMask, NSScreen, NSStatusBar, NSStatusBarButton, NSStatusItem,
+    NSVariableStatusItemLength, NSView,
 };
-use objc2_foundation::{NSAttributedString, NSDictionary, NSPoint, NSRect, NSString};
+use objc2_foundation::{NSPoint, NSRect};
 
-use crate::menu_bar_icon;
-
-/// The gap between the percentage and the ring. AppKit only exposes image
-/// padding on the button from macOS 14, and `objc2` 0.3 does not bind it, so
-/// the spacing is a trailing space in the title instead — a space in the menu
-/// bar font is about the 4pt this wants. It trails rather than leads because
-/// the number comes first and the ring after it, the way the battery item sits.
-const IMAGE_TITLE_GAP: &str = " ";
-
-/// The menu bar title as AppKit is given it: the percentage with its trailing
-/// gap, or nothing at all when there is no percentage to show.
-fn spaced_title(title: &str) -> String {
-    if title.is_empty() {
-        String::new()
-    } else {
-        format!("{title}{IMAGE_TITLE_GAP}")
-    }
-}
+use crate::menu_bar_icon::{self, ItemPart, MenuBarInk};
 
 /// What the menu bar item is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MenuBarState {
     /// Loading, signed out, or otherwise nothing to report: an empty ring, no
     /// number, and AppKit's own disabled rendering.
     Idle,
-    /// The utilisation of whichever limit the user picked. `low` is
-    /// [`crate::model::Limit::is_low`], which turns both the number and the
-    /// ring red; `show_percent` is the user's choice of ring alone or ring
-    /// with a number beside it.
+    /// One part per limit the user picked, in the order they are drawn, plus
+    /// the two choices that apply to the whole item: whether it prints the
+    /// numbers and whether it draws the rings.
     Usage {
-        percent: u32,
-        low: bool,
+        parts: Vec<ItemPart>,
         show_percent: bool,
+        show_rings: bool,
     },
 }
 
 impl MenuBarState {
-    /// The number beside the ring. Whole percent, as the spec asks; empty while
-    /// idle, and empty when the user asked for the ring alone.
-    fn title(self) -> String {
-        match self {
-            MenuBarState::Idle => String::new(),
-            MenuBarState::Usage {
-                show_percent: false,
-                ..
-            } => String::new(),
-            MenuBarState::Usage { percent, .. } => format!("{percent}%"),
-        }
-    }
-
-    /// The percentage the ring is drawn for.
-    fn ring_percent(self) -> f32 {
-        match self {
-            MenuBarState::Idle => 0.0,
-            MenuBarState::Usage { percent, .. } => percent as f32,
-        }
-    }
-
-    /// Whether this state is the red, nearly-out one.
-    fn low(self) -> bool {
-        matches!(self, MenuBarState::Usage { low: true, .. })
-    }
-
     /// Idle states are faded, the way the system items fade when they have
     /// nothing to say. A ring-only item is not idle: it has something to
     /// report, it just reports it without a number, so it stays full strength.
-    fn dimmed(self) -> bool {
+    fn dimmed(&self) -> bool {
         matches!(self, MenuBarState::Idle)
+    }
+
+    /// What [`menu_bar_icon::item_image`] should draw: the parts and the two
+    /// flags. Idle is one empty ring and no number.
+    fn drawing(&self) -> (Vec<ItemPart>, bool, bool) {
+        match self {
+            MenuBarState::Idle => (
+                vec![ItemPart {
+                    tag: None,
+                    percent: 0.0,
+                    low: false,
+                }],
+                false,
+                true,
+            ),
+            MenuBarState::Usage {
+                parts,
+                show_percent,
+                show_rings,
+            } => (parts.clone(), *show_percent, *show_rings),
+        }
     }
 }
 
@@ -101,6 +78,14 @@ pub enum StatusItemEvent {
     /// global event monitor is. Global monitors never see our own app's
     /// clicks, so clicking the status item itself does not produce this.
     ClickedOutside,
+}
+
+/// Where the menu bar item is: its own frame and the frame of the display it
+/// is currently on, both in gpui's screen coordinate space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Anchor {
+    pub item: ScreenRect,
+    pub screen: ScreenRect,
 }
 
 /// A rectangle in gpui's screen coordinate space (top-left origin, y down).
@@ -155,11 +140,11 @@ pub struct StatusItem {
 impl StatusItem {
     /// Install the menu bar item. Returns it plus the click channel.
     ///
-    /// The item is the session percentage followed by the ring image, in the
-    /// menu bar's own font, so it sits like the battery item. Callers pass the
-    /// state they have; [`MenuBarState::Idle`] leaves the ring alone with no
-    /// number, and it stays clickable because the image has a hit area of its
-    /// own.
+    /// The item is one image of every picked limit — percentage then ring, in
+    /// the menu bar's own font — so it sits like the battery item. Callers
+    /// pass the state they have; [`MenuBarState::Idle`] leaves one empty ring
+    /// with no number, and it stays clickable because the image has a hit area
+    /// of its own.
     pub fn new(
         mtm: MainThreadMarker,
         state: MenuBarState,
@@ -173,15 +158,14 @@ impl StatusItem {
 
         if let Some(button) = item.button(mtm) {
             unsafe {
-                // Number left, ring right; `imageHugsTitle` keeps them as a
-                // pair instead of pushing the image to the button's far edge.
-                button.setImagePosition(NSCellImagePosition::ImageTrailing);
-                button.setImageHugsTitle(true);
+                // The whole item — numbers, tags and rings — is the image, so
+                // the button has no title to place beside it.
+                button.setImagePosition(NSCellImagePosition::ImageOnly);
                 let control: &NSControl = &button;
                 control.setTarget(Some(&*target));
                 control.setAction(Some(sel!(claudebarStatusItemClicked:)));
             }
-            apply_state(&button, state);
+            apply_state(&button, &state);
         }
 
         let outside_monitor = install_outside_click_monitor(tx_outside);
@@ -201,81 +185,117 @@ impl StatusItem {
     /// than mutated.
     pub fn set_state(&self, mtm: MainThreadMarker, state: MenuBarState) {
         if let Some(button) = self.item.button(mtm) {
-            apply_state(&button, state);
+            apply_state(&button, &state);
         }
     }
 
-    /// The status item button's frame, in gpui screen coordinates.
+    /// Where the item is and which display it is on, in gpui screen
+    /// coordinates.
     ///
-    /// AppKit hands back a bottom-left-origin rect on the status bar's own
+    /// AppKit hands back bottom-left-origin rects on the status bar's own
     /// window; gpui wants top-left-origin relative to the primary display, so
-    /// we flip through the primary screen's height.
-    pub fn screen_rect(&self, mtm: MainThreadMarker) -> Option<ScreenRect> {
+    /// we flip both through the primary screen's height.
+    ///
+    /// The screen comes along because macOS moves the menu bar — and every
+    /// status item with it — to whichever display has the user's attention,
+    /// and that display is often not the primary one. gpui reports every
+    /// display as if it began at the origin, so the popover has to be clamped
+    /// against this rectangle; clamping against the primary display's size
+    /// pins the popover to the primary display's right edge whenever the item
+    /// is sitting further right than that display is wide.
+    pub fn anchor(&self, mtm: MainThreadMarker) -> Option<Anchor> {
         let button = self.item.button(mtm)?;
         let window = button.window()?;
         let frame: NSRect = window.frame();
         let flip_height = primary_screen_height(mtm)?;
+        let screen = screen_containing(mtm, frame)?;
 
-        Some(ScreenRect {
-            x: frame.origin.x as f32,
-            // Top edge in flipped coords.
-            y: (flip_height - (frame.origin.y + frame.size.height)) as f32,
-            width: frame.size.width as f32,
-            height: frame.size.height as f32,
+        Some(Anchor {
+            item: flipped(frame, flip_height),
+            screen: flipped(screen, flip_height),
         })
     }
 }
 
-/// Push a state onto the button: the number, the ring, and the fade.
+/// An AppKit rect in gpui's screen coordinates.
+fn flipped(frame: NSRect, flip_height: f64) -> ScreenRect {
+    ScreenRect {
+        x: frame.origin.x as f32,
+        // Top edge in flipped coords.
+        y: (flip_height - (frame.origin.y + frame.size.height)) as f32,
+        width: frame.size.width as f32,
+        height: frame.size.height as f32,
+    }
+}
+
+/// The frame of the screen `rect` sits on, by its midpoint — `NSWindow`'s own
+/// `screen` is nil for a window AppKit considers offscreen, and the status
+/// item's window is an odd enough one not to trust that on. Falls back to the
+/// primary screen, which is where the menu bar is unless a second display has
+/// the user's attention.
+fn screen_containing(mtm: MainThreadMarker, rect: NSRect) -> Option<NSRect> {
+    let mid = NSPoint::new(
+        rect.origin.x + rect.size.width / 2.0,
+        rect.origin.y + rect.size.height / 2.0,
+    );
+    let screens = NSScreen::screens(mtm);
+    let mut primary: Option<NSRect> = None;
+    for screen in screens.iter() {
+        let frame = screen.frame();
+        if primary.is_none() || frame.origin == NSPoint::new(0.0, 0.0) {
+            primary = Some(frame);
+        }
+        let inside = mid.x >= frame.origin.x
+            && mid.x <= frame.origin.x + frame.size.width
+            && mid.y >= frame.origin.y
+            && mid.y <= frame.origin.y + frame.size.height;
+        if inside {
+            return Some(frame);
+        }
+    }
+    primary
+}
+
+/// Push a state onto the button: the picture and the fade.
 ///
-/// The title is always an attributed string, never a plain one: a plain title
-/// on a status item picks up AppKit's default 13pt control font, which sits
-/// visibly larger than the battery percentage next door, and a plain title set
-/// after an attributed one does not reliably take the button's font back. One
-/// path, with the font spelled out every time, is what keeps the number the
-/// same size in every state.
-fn apply_state(button: &NSStatusBarButton, state: MenuBarState) {
-    let title = spaced_title(&state.title());
-    button.setAttributedTitle(&styled_title(&title, state.low()));
-    button.setImage(Some(&menu_bar_icon::ring_image(
-        state.ring_percent(),
-        state.low(),
+/// Everything visible is one image (see [`menu_bar_icon::item_image`]): a
+/// status item button draws one title and one image, and two limits need two
+/// rings, so the numbers are drawn into the image rather than set as a title.
+/// That also settles an old annoyance — a plain title picks up AppKit's 13pt
+/// control font, which sat visibly larger than the battery percentage next
+/// door, and the font is now spelled out in one place.
+fn apply_state(button: &NSStatusBarButton, state: &MenuBarState) {
+    let (parts, show_percent, show_rings) = state.drawing();
+    button.setImage(Some(&menu_bar_icon::item_image(
+        &parts,
+        show_percent,
+        show_rings,
+        menu_bar_ink(button),
     )));
     button.setAppearsDisabled(state.dimmed());
 }
 
-/// The point size of the percentage. The menu bar's own font is 13pt, but the
-/// system's battery percentage is set smaller, and this item sits right beside
-/// it: measured off a 2x screen capture, the battery digits are 16px tall and
-/// 12pt here came out at 18px, so 11pt is what lines them up.
-const TITLE_POINT_SIZE: f64 = 11.0;
-
-/// The title in the battery item's size, and in the system red when `low` so
-/// it matches the ring. The colour comes from `NSColor` rather than a literal so
-/// it tracks the menu bar appearance and the user's accessibility settings; a
-/// non-low title carries no colour attribute at all, leaving the menu bar to
-/// tint it like any other item.
-fn styled_title(title: &str, low: bool) -> Retained<NSAttributedString> {
-    let font = NSFont::menuBarFontOfSize(TITLE_POINT_SIZE);
-    let red = NSColor::systemRedColor();
-    // Safety: `NSFontAttributeName` documents its value as an `NSFont` and
-    // `NSForegroundColorAttributeName` as an `NSColor`, which is what we pass.
-    unsafe {
-        let attrs = if low {
-            NSDictionary::from_slices(
-                &[NSFontAttributeName, NSForegroundColorAttributeName],
-                &[
-                    &*font as &objc2::runtime::AnyObject,
-                    &*red as &objc2::runtime::AnyObject,
-                ],
-            )
-        } else {
-            NSDictionary::from_slices(
-                &[NSFontAttributeName],
-                &[&*font as &objc2::runtime::AnyObject],
-            )
-        };
-        NSAttributedString::new_with_attributes(&NSString::from_str(title), &attrs)
+/// Which ink the menu bar is drawing in, read off the status item button
+/// itself.
+///
+/// Only an item that has gone red needs this — everything else is a template
+/// image the menu bar tints itself — and the button's own appearance is the
+/// only honest source: the menu bar over a pale wallpaper is light even in
+/// dark mode. The names are `NSAppearanceNameVibrantDark`, `...DarkAqua` and
+/// the high-contrast variants of both, so "Dark" anywhere in the name is the
+/// test. Read when the image is built, which means a theme change mid-window
+/// is picked up by the next fetch rather than the instant it happens.
+fn menu_bar_ink(button: &NSStatusBarButton) -> MenuBarInk {
+    let view: &NSView = button;
+    if view
+        .effectiveAppearance()
+        .name()
+        .to_string()
+        .contains("Dark")
+    {
+        MenuBarInk::White
+    } else {
+        MenuBarInk::Black
     }
 }
 
@@ -331,66 +351,67 @@ fn install_outside_click_monitor(
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_percentage_is_spaced_off_the_ring_that_follows_it() {
-        assert_eq!(spaced_title("2%"), "2% ");
+    fn part(percent: f32, low: bool) -> ItemPart {
+        ItemPart {
+            tag: None,
+            percent,
+            low,
+        }
     }
 
-    #[test]
-    fn no_percentage_means_no_title_at_all_not_a_stray_space() {
-        assert_eq!(spaced_title(""), "");
-    }
-
+    /// Idle draws one empty ring and no number, and takes AppKit's fade.
     #[test]
     fn the_idle_state_is_a_dimmed_empty_ring_with_no_number() {
-        let idle = MenuBarState::Idle;
-        assert_eq!(idle.title(), "");
-        assert_eq!(idle.ring_percent(), 0.0);
-        assert!(!idle.low());
-        assert!(idle.dimmed());
+        let (parts, show_percent, show_rings) = MenuBarState::Idle.drawing();
+        assert_eq!(parts, vec![part(0.0, false)]);
+        assert!(!show_percent);
+        assert!(show_rings);
+        assert!(MenuBarState::Idle.dimmed());
     }
 
+    /// A state with numbers is never faded — it has something to say.
     #[test]
-    fn a_usage_state_shows_a_whole_percent_and_is_not_dimmed() {
+    fn a_usage_state_draws_what_it_was_given_and_is_not_dimmed() {
         let state = MenuBarState::Usage {
-            percent: 2,
-            low: false,
+            parts: vec![
+                ItemPart {
+                    tag: Some("5h".into()),
+                    percent: 5.0,
+                    low: false,
+                },
+                ItemPart {
+                    tag: Some("wk".into()),
+                    percent: 92.0,
+                    low: true,
+                },
+            ],
             show_percent: true,
+            show_rings: true,
         };
-        assert_eq!(state.title(), "2%");
-        assert_eq!(state.ring_percent(), 2.0);
+        let (parts, show_percent, show_rings) = state.drawing();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[1].tag.as_deref(), Some("wk"));
+        assert!(parts[1].low);
+        assert!(show_percent);
+        assert!(show_rings);
         assert!(!state.dimmed());
     }
 
-    /// With the percentage turned off the item is the ring alone: an empty
-    /// title, the same arc, and no fade — it still has something to say.
+    /// The ring-only and number-only choices reach the drawing code as they
+    /// were set; `item_image` is what refuses to draw nothing at all.
     #[test]
-    fn a_ring_only_state_drops_the_number_but_not_the_ring() {
+    fn the_two_drawing_choices_are_carried_through() {
         let state = MenuBarState::Usage {
-            percent: 42,
-            low: false,
+            parts: vec![part(42.0, false)],
             show_percent: false,
+            show_rings: true,
         };
-        assert_eq!(state.title(), "");
-        assert_eq!(spaced_title(&state.title()), "");
-        assert_eq!(state.ring_percent(), 42.0);
-        assert!(!state.dimmed());
-    }
-
-    #[test]
-    fn only_a_low_usage_state_goes_red() {
-        assert!(MenuBarState::Usage {
-            percent: 92,
-            low: true,
+        assert!(!state.drawing().1);
+        let state = MenuBarState::Usage {
+            parts: vec![part(42.0, false)],
             show_percent: true,
-        }
-        .low());
-        assert!(!MenuBarState::Usage {
-            percent: 92,
-            low: false,
-            show_percent: true,
-        }
-        .low());
-        assert!(!MenuBarState::Idle.low());
+            show_rings: false,
+        };
+        assert!(!state.drawing().2);
     }
 }

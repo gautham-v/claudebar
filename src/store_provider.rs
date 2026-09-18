@@ -21,6 +21,7 @@ use chrono::{DateTime, Local};
 use gpui::AsyncApp;
 
 use crate::local;
+use crate::menu_bar_icon::ItemPart;
 use crate::model::{LocalStats, Usage};
 use crate::settings::Settings;
 use crate::status_item::MenuBarState;
@@ -100,6 +101,27 @@ impl StoreProvider {
         *self.on_change.borrow_mut() = Some(hook);
     }
 
+    /// Run the change hook on the main thread, but never inside the caller's
+    /// own update.
+    ///
+    /// [`Self::set_settings`] is called from a popover row's click handler,
+    /// which already holds both the `App` borrow and the popover entity's
+    /// lease; reaching for either from there panics, so changing a setting
+    /// from the menu used to take the app down with it. Handing the hook to
+    /// the foreground executor lands it on the next turn of the main loop,
+    /// when the borrow and the lease are free again — and a fetch, which
+    /// finishes on a background thread, is happy either way.
+    fn notify_change(&self) {
+        let Some(hook) = self.on_change.borrow().clone() else {
+            return;
+        };
+        self.cx
+            .spawn(async move |cx: &mut AsyncApp| {
+                let _ = cx.update(|cx| hook(cx));
+            })
+            .detach();
+    }
+
     /// What the menu bar item should draw: whichever limit the settings name,
     /// or nothing at all while loading, signed out, errored without a previous
     /// snapshot, or when that limit is not in the snapshot at all.
@@ -171,15 +193,31 @@ impl StoreProvider {
 /// The menu bar item's state for a snapshot. A free function so the mapping —
 /// the only part of this file that is pure — is exercised by the tests below
 /// rather than reimplemented by them.
+///
+/// The picked limits come back in snapshot order, and a limit the account does
+/// not have is simply not drawn; when none of the picks are in the snapshot the
+/// item goes idle rather than falling back to some other window's number.
 fn menu_bar_state_for(usage: Option<&Usage>, settings: &Settings) -> MenuBarState {
-    let chosen = usage.and_then(|u| u.limits.iter().find(|l| settings.menu_bar.matches(l)));
-    match chosen {
-        Some(limit) => MenuBarState::Usage {
-            percent: limit.percent_rounded(),
+    let Some(usage) = usage else {
+        return MenuBarState::Idle;
+    };
+    let picked = settings.menu_bar_limits(&usage.limits);
+    if picked.is_empty() {
+        return MenuBarState::Idle;
+    }
+    let labels = settings.labels_shown(picked.len());
+    let parts = picked
+        .into_iter()
+        .map(|limit| ItemPart {
+            tag: labels.then(|| limit.menu_bar_tag().to_string()),
+            percent: limit.percent,
             low: limit.is_low(settings.low_remaining_percent),
-            show_percent: settings.show_percent,
-        },
-        None => MenuBarState::Idle,
+        })
+        .collect();
+    MenuBarState::Usage {
+        parts,
+        show_percent: settings.show_percent,
+        show_rings: settings.show_rings,
     }
 }
 
@@ -236,11 +274,7 @@ impl UsageProvider for StoreProvider {
     fn set_settings(&self, settings: Settings) {
         *self.settings.borrow_mut() = settings;
         *self.settings_note.borrow_mut() = self.settings.borrow().save().err();
-        let hook = self.on_change.borrow().clone();
-        if let Some(hook) = hook {
-            let cx = self.cx.clone();
-            let _ = cx.update(|cx| hook(cx));
-        }
+        self.notify_change();
     }
 }
 
@@ -248,20 +282,49 @@ impl UsageProvider for StoreProvider {
 mod tests {
     use super::*;
     use crate::model::{Limit, LimitKind};
+    use crate::settings::MenuBarLimit;
 
-    fn usage_with(percent: f32) -> Usage {
+    fn limit(kind: LimitKind, percent: f32) -> Limit {
+        Limit {
+            kind,
+            percent,
+            resets_at: None,
+        }
+    }
+
+    fn usage_of(limits: Vec<Limit>) -> Usage {
         Usage {
-            limits: vec![Limit {
-                kind: LimitKind::Session,
-                percent,
-                resets_at: None,
-            }],
+            limits,
             plan: Some("Max".into()),
             fetched_at: Local::now(),
         }
     }
 
-    use crate::settings::MenuBarLimit;
+    fn snapshot() -> Usage {
+        usage_of(vec![
+            limit(LimitKind::Session, 5.0),
+            limit(LimitKind::Weekly, 45.0),
+            limit(LimitKind::Model("Fable".into()), 52.0),
+        ])
+    }
+
+    /// The parts as `(tag, percent, low)`, which is all the tests care about.
+    fn drawn(state: &MenuBarState) -> Vec<(Option<String>, f32, bool)> {
+        match state {
+            MenuBarState::Idle => vec![],
+            MenuBarState::Usage { parts, .. } => parts
+                .iter()
+                .map(|p| (p.tag.clone(), p.percent, p.low))
+                .collect(),
+        }
+    }
+
+    fn with(menu_bar: Vec<MenuBarLimit>) -> Settings {
+        Settings {
+            menu_bar,
+            ..Settings::default()
+        }
+    }
 
     #[test]
     fn no_snapshot_leaves_the_menu_bar_idle() {
@@ -271,113 +334,136 @@ mod tests {
         );
     }
 
+    /// The default is one limit, and one limit carries no tag: there is
+    /// nothing to tell it apart from.
     #[test]
-    fn a_session_limit_becomes_a_rounded_percent() {
+    fn a_single_limit_is_one_untagged_number() {
+        let state = menu_bar_state_for(Some(&snapshot()), &Settings::default());
+        assert_eq!(drawn(&state), vec![(None, 5.0, false)]);
+    }
+
+    /// Two limits: both tagged, in snapshot order whatever order the setting
+    /// names them in.
+    #[test]
+    fn two_limits_are_tagged_and_drawn_in_snapshot_order() {
+        let state = menu_bar_state_for(
+            Some(&snapshot()),
+            &with(vec![MenuBarLimit::Weekly, MenuBarLimit::Session]),
+        );
         assert_eq!(
-            menu_bar_state_for(Some(&usage_with(2.4)), &Settings::default()),
-            MenuBarState::Usage {
-                percent: 2,
-                low: false,
-                show_percent: true
-            }
+            drawn(&state),
+            vec![
+                (Some("5h".into()), 5.0, false),
+                (Some("wk".into()), 45.0, false)
+            ]
         );
     }
 
+    /// Labels off is the option the menu offers, and it leaves the numbers
+    /// bare.
     #[test]
-    fn a_nearly_spent_session_goes_red() {
-        assert_eq!(
-            menu_bar_state_for(Some(&usage_with(84.0)), &Settings::default()),
-            MenuBarState::Usage {
-                percent: 84,
-                low: true,
-                show_percent: true
-            }
-        );
-    }
-
-    /// A snapshot with no session limit in it (a response that only carried the
-    /// weekly window) has no percentage for the menu bar, and must not fall
-    /// back to another limit's number.
-    #[test]
-    fn a_snapshot_without_a_session_limit_is_idle() {
-        let weekly_only = Usage {
-            limits: vec![Limit {
-                kind: LimitKind::Weekly,
-                percent: 92.0,
-                resets_at: None,
-            }],
-            plan: None,
-            fetched_at: Local::now(),
+    fn labels_can_be_turned_off() {
+        let settings = Settings {
+            menu_bar: vec![MenuBarLimit::Session, MenuBarLimit::Weekly],
+            show_labels: false,
+            ..Settings::default()
         };
+        let state = menu_bar_state_for(Some(&snapshot()), &settings);
+        assert_eq!(drawn(&state), vec![(None, 5.0, false), (None, 45.0, false)]);
+    }
+
+    /// Only the window that is nearly spent goes red; the other keeps the menu
+    /// bar's own ink.
+    #[test]
+    fn low_is_per_limit() {
+        let usage = usage_of(vec![
+            limit(LimitKind::Session, 5.0),
+            limit(LimitKind::Weekly, 92.0),
+        ]);
+        let state = menu_bar_state_for(
+            Some(&usage),
+            &with(vec![MenuBarLimit::Session, MenuBarLimit::Weekly]),
+        );
+        assert_eq!(
+            drawn(&state),
+            vec![
+                (Some("5h".into()), 5.0, false),
+                (Some("wk".into()), 92.0, true)
+            ]
+        );
+    }
+
+    /// A model-scoped window is tagged with its own name, since that is the
+    /// only thing that tells two of them apart.
+    #[test]
+    fn a_model_is_tagged_with_its_name() {
+        let state = menu_bar_state_for(
+            Some(&snapshot()),
+            &with(vec![
+                MenuBarLimit::Session,
+                MenuBarLimit::Model("Fable".into()),
+            ]),
+        );
+        assert_eq!(drawn(&state)[1].0.as_deref(), Some("Fable"));
+    }
+
+    /// A snapshot with none of the picked limits in it has no percentage to
+    /// show, and must not fall back to another window's number.
+    #[test]
+    fn a_snapshot_without_the_picked_limits_is_idle() {
+        let weekly_only = usage_of(vec![limit(LimitKind::Weekly, 92.0)]);
         assert_eq!(
             menu_bar_state_for(Some(&weekly_only), &Settings::default()),
             MenuBarState::Idle
         );
-    }
-
-    /// The same snapshot, read through a setting that names the weekly window.
-    #[test]
-    fn the_settings_pick_which_limit_the_menu_bar_tracks() {
-        let usage = Usage {
-            limits: vec![
-                Limit {
-                    kind: LimitKind::Session,
-                    percent: 2.0,
-                    resets_at: None,
-                },
-                Limit {
-                    kind: LimitKind::Weekly,
-                    percent: 55.0,
-                    resets_at: None,
-                },
-                Limit {
-                    kind: LimitKind::Model("Fable".into()),
-                    percent: 71.0,
-                    resets_at: None,
-                },
-            ],
-            plan: None,
-            fetched_at: Local::now(),
-        };
-        let with = |menu_bar| {
-            menu_bar_state_for(
-                Some(&usage),
-                &Settings {
-                    menu_bar,
-                    ..Settings::default()
-                },
-            )
-        };
-        assert!(matches!(
-            with(MenuBarLimit::Weekly),
-            MenuBarState::Usage { percent: 55, .. }
-        ));
-        assert!(matches!(
-            with(MenuBarLimit::Model("Fable".into())),
-            MenuBarState::Usage { percent: 71, .. }
-        ));
-        // A limit the account does not have leaves the item idle rather than
-        // silently showing a different window's number.
-        assert_eq!(with(MenuBarLimit::Model("Opus".into())), MenuBarState::Idle);
-    }
-
-    #[test]
-    fn the_settings_carry_the_low_threshold_and_the_number() {
-        let state = menu_bar_state_for(
-            Some(&usage_with(65.0)),
-            &Settings {
-                low_remaining_percent: 40.0,
-                show_percent: false,
-                ..Settings::default()
-            },
-        );
         assert_eq!(
-            state,
-            MenuBarState::Usage {
-                percent: 65,
-                low: true,
-                show_percent: false
-            }
+            menu_bar_state_for(
+                Some(&snapshot()),
+                &with(vec![MenuBarLimit::Model("Opus".into())])
+            ),
+            MenuBarState::Idle
         );
+    }
+
+    /// A pick the account does not have is skipped rather than idling the
+    /// whole item, as long as something else is drawn.
+    #[test]
+    fn a_missing_pick_is_skipped() {
+        let state = menu_bar_state_for(
+            Some(&snapshot()),
+            &with(vec![
+                MenuBarLimit::Model("Opus".into()),
+                MenuBarLimit::Weekly,
+            ]),
+        );
+        assert_eq!(drawn(&state), vec![(None, 45.0, false)]);
+    }
+
+    #[test]
+    fn the_settings_carry_the_low_threshold_and_the_two_drawing_choices() {
+        let settings = Settings {
+            low_remaining_percent: 40.0,
+            show_percent: false,
+            show_rings: true,
+            ..Settings::default()
+        };
+        let state = menu_bar_state_for(Some(&snapshot()), &settings);
+        match state {
+            MenuBarState::Usage {
+                parts,
+                show_percent,
+                show_rings,
+            } => {
+                // 5% used is not low, but a 40% threshold makes 65% used low;
+                // check the threshold reaches the part.
+                assert!(!parts[0].low);
+                assert!(!show_percent);
+                assert!(show_rings);
+            }
+            MenuBarState::Idle => panic!("expected a usage state"),
+        }
+        let nearly_out = usage_of(vec![limit(LimitKind::Session, 65.0)]);
+        let state = menu_bar_state_for(Some(&nearly_out), &settings);
+        assert!(drawn(&state)[0].2);
     }
 }

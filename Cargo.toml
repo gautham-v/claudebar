@@ -1,6 +1,6 @@
 [package]
 name = "claudebar"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "A macOS menu bar app that shows your Claude usage limits"
 license = "MIT"
@@ -45,6 +45,8 @@ features = [
     "NSRunLoop",
     "NSThread",
     "NSBundle",
+    "NSAttributedString",
+    "NSDictionary",
 ]
 
 [dependencies.objc2-app-kit]
@@ -68,6 +70,9 @@ features = [
     "NSCell",
     "NSFont",
     "NSColor",
+    "NSAttributedString",
+    "NSStringDrawing",
+    "NSAppearance",
     "block2",
     "objc2-core-foundation",
     "objc2-core-graphics",

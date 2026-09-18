@@ -6,8 +6,9 @@ Your Claude usage limits in the macOS menu bar. Rust + [GPUI](https://www.gpui.r
 <img src="docs/screenshot.png" width="480" alt="claudebar: the menu bar item and its popover">
 
 The menu bar shows how much of your five-hour session you have used, and goes red when 20% is
-left. Click it for every limit on your plan with its reset time, what you did today, and the last
-seven days. No account, no config, no Dock icon.
+left. Pick more than one limit and it draws them side by side — `5h 9% ◯  wk 45% ◐` — tagging
+each so you can tell them apart. Click it for every limit on your plan with its reset time, what
+you did today, and the last seven days. No account, no config, no Dock icon.
 
 ## Install
 
@@ -34,8 +35,10 @@ The **Settings** row in the popover, or `~/.config/claudebar/config.toml`:
 
 | key | default | |
 |---|---|---|
-| `menu_bar` | `"session"` | what the menu bar tracks: `"session"`, `"weekly"`, or a model name like `"Fable"` |
-| `show_percent` | `true` | `false` shows the ring alone |
+| `menu_bar` | `["session"]` | what the menu bar draws: any of `"session"`, `"weekly"`, or a model name like `"Fable"` — one name or a list, in the order drawn |
+| `show_percent` | `true` | `false` shows the rings alone |
+| `show_labels` | `true` | the `5h` / `wk` / model tag before each number; only ever drawn when there is more than one |
+| `show_rings` | `true` | `false` shows the numbers alone, the narrowest way to carry three |
 | `low_remaining_percent` | `20.0` | how much of a window is left when it goes red |
 | `refresh_minutes` | `5` | how often to refetch |
 

@@ -2,8 +2,8 @@
 //!
 //! claudebar works with no config at all: everything here has a default, and a
 //! missing file is the normal case rather than an error. The file exists so the
-//! choices made in the popover's "···" menu — which limit the menu bar tracks,
-//! whether it prints a number, and the two thresholds — survive a relaunch.
+//! choices made in the popover's Settings section — which limits the menu bar
+//! tracks, how it draws them, and the two thresholds — survive a relaunch.
 //!
 //! The file is `~/.config/claudebar/config.toml`, next to mailbar's own config
 //! directory. It is read once at startup and rewritten whenever the menu
@@ -93,16 +93,61 @@ impl<'de> Deserialize<'de> for MenuBarLimit {
     }
 }
 
+/// `menu_bar` reads as either one name or a list of them.
+///
+/// The key started life as a single string, and files written by 0.1.x still
+/// have one; a list is what a build that can draw several limits writes. Both
+/// load, and what we write back is always a list, because that is the shape
+/// the setting has now.
+mod menu_bar_list {
+    use super::MenuBarLimit;
+    use serde::de::Deserializer;
+    use serde::ser::Serializer;
+    use serde::Deserialize;
+
+    pub fn serialize<S: Serializer>(
+        limits: &[MenuBarLimit],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(limits)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<MenuBarLimit>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum OneOrMany {
+            One(MenuBarLimit),
+            Many(Vec<MenuBarLimit>),
+        }
+        Ok(match OneOrMany::deserialize(deserializer)? {
+            OneOrMany::One(limit) => vec![limit],
+            OneOrMany::Many(limits) => limits,
+        })
+    }
+}
+
 /// Everything the user can choose. Every field carries a serde default, so a
 /// file with one key in it is a valid file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Which limit the menu bar item tracks.
-    pub menu_bar: MenuBarLimit,
-    /// Whether the menu bar prints the percentage beside the ring. With this
-    /// off the item is the ring alone.
+    /// Which limits the menu bar item draws, in the order it draws them.
+    /// Several at once is the point of the list: session and week side by
+    /// side is what most people came for.
+    #[serde(with = "menu_bar_list")]
+    pub menu_bar: Vec<MenuBarLimit>,
+    /// Whether the menu bar prints the percentage. With this off the item is
+    /// rings alone.
     pub show_percent: bool,
+    /// Whether each number is prefixed with its window's tag ("5h", "wk", the
+    /// model's name). Only ever drawn when the item is showing more than one
+    /// limit: one number needs no saying which it is.
+    pub show_labels: bool,
+    /// Whether each limit gets its ring. With this off the item is numbers
+    /// alone, which is the narrowest way to carry three windows.
+    pub show_rings: bool,
     /// How little of a window has to be left before it is drawn in red.
     pub low_remaining_percent: f32,
     /// How often the limits and the local scan are refetched.
@@ -116,8 +161,10 @@ pub const DEFAULT_REFRESH_MINUTES: u64 = 5;
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            menu_bar: MenuBarLimit::Session,
+            menu_bar: vec![MenuBarLimit::Session],
             show_percent: true,
+            show_labels: true,
+            show_rings: true,
             low_remaining_percent: LOW_REMAINING_PERCENT,
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
         }
@@ -127,8 +174,9 @@ impl Default for Settings {
 /// What goes at the top of a file we write, so whoever opens it knows what it
 /// is and that the popover owns it.
 const FILE_HEADER: &str = "\
-# claudebar settings. Written by the \u{b7}\u{b7}\u{b7} menu; safe to edit by hand.
-# menu_bar: \"session\", \"weekly\", or a model display name such as \"Fable\".
+# claudebar settings. Written by the Settings section; safe to edit by hand.
+# menu_bar: any of \"session\", \"weekly\", or a model display name such as
+# \"Fable\" \u{2014} one name or a list of them, drawn in the order given.
 ";
 
 impl Settings {
@@ -192,13 +240,45 @@ impl Settings {
             .map_err(|e| format!("Could not write {}: {e}", path.display()))
     }
 
-    /// The same settings with the two numbers pulled back into their usable
-    /// range, so a hand-edited file cannot produce a ring that never goes red
-    /// or a refresh loop with no delay in it.
+    /// The same settings pulled back into the range that draws something, so
+    /// a hand-edited file cannot produce a ring that never goes red, a refresh
+    /// loop with no delay in it, or a menu bar item with nothing in it at all.
     fn clamped(mut self) -> Self {
         self.low_remaining_percent = self.low_remaining_percent.clamp(0.0, 100.0);
         self.refresh_minutes = self.refresh_minutes.max(1);
+        // An empty list, or numbers and rings both off, leaves an item with no
+        // ink and so no click target; fall back to the ring rather than to
+        // nothing.
+        if self.menu_bar.is_empty() {
+            self.menu_bar = vec![MenuBarLimit::Session];
+        }
+        if !self.show_percent && !self.show_rings {
+            self.show_rings = true;
+        }
         self
+    }
+
+    /// The limits from a snapshot that the menu bar is set to draw, in the
+    /// order the *settings* name them rather than the order the response
+    /// happened to arrive in — a person who checks Week and then Session
+    /// means the list they see in the popover, which is snapshot order, so
+    /// this walks the snapshot and keeps what is picked.
+    pub fn menu_bar_limits<'a>(&self, limits: &'a [Limit]) -> Vec<&'a Limit> {
+        limits
+            .iter()
+            .filter(|limit| self.menu_bar.iter().any(|choice| choice.matches(limit)))
+            .collect()
+    }
+
+    /// Whether the menu bar is set to draw this choice.
+    pub fn shows(&self, choice: &MenuBarLimit) -> bool {
+        self.menu_bar.contains(choice)
+    }
+
+    /// Whether a tag is drawn before each number: only when the user asked for
+    /// labels *and* there is more than one number to tell apart.
+    pub fn labels_shown(&self, drawn_limits: usize) -> bool {
+        self.show_labels && drawn_limits > 1
     }
 }
 
@@ -215,8 +295,10 @@ mod tests {
     #[test]
     fn the_defaults_are_the_behaviour_claudebar_shipped_with() {
         let settings = Settings::default();
-        assert_eq!(settings.menu_bar, MenuBarLimit::Session);
+        assert_eq!(settings.menu_bar, vec![MenuBarLimit::Session]);
         assert!(settings.show_percent);
+        assert!(settings.show_labels);
+        assert!(settings.show_rings);
         assert_eq!(settings.low_remaining_percent, LOW_REMAINING_PERCENT);
         assert_eq!(settings.refresh_minutes, 5);
     }
@@ -247,26 +329,28 @@ mod tests {
     fn a_partial_file_keeps_the_other_defaults() {
         let settings: Settings = toml::from_str("show_percent = false\n").unwrap();
         assert!(!settings.show_percent);
-        assert_eq!(settings.menu_bar, MenuBarLimit::Session);
+        assert_eq!(settings.menu_bar, vec![MenuBarLimit::Session]);
         assert_eq!(settings.refresh_minutes, 5);
     }
 
     #[test]
     fn unknown_keys_are_ignored() {
         let settings: Settings = toml::from_str("menu_bar = \"weekly\"\nfuture_key = 3\n").unwrap();
-        assert_eq!(settings.menu_bar, MenuBarLimit::Weekly);
+        assert_eq!(settings.menu_bar, vec![MenuBarLimit::Weekly]);
     }
 
     #[test]
     fn a_written_file_reads_back_as_itself() {
         let settings = Settings {
-            menu_bar: MenuBarLimit::Model("Fable".into()),
+            menu_bar: vec![MenuBarLimit::Weekly, MenuBarLimit::Model("Fable".into())],
             show_percent: false,
+            show_labels: false,
+            show_rings: true,
             low_remaining_percent: 35.0,
             refresh_minutes: 12,
         };
         let text = toml::to_string(&settings).unwrap();
-        assert!(text.contains("menu_bar = \"Fable\""));
+        assert!(text.contains("menu_bar = [\"weekly\", \"Fable\"]"));
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), settings);
     }
 
@@ -303,6 +387,108 @@ mod tests {
         assert!(
             !MenuBarLimit::Model("Fable".into()).matches(&limit(LimitKind::Model("Opus".into())))
         );
+    }
+
+    /// The key was a single string in 0.1.x and files still say so; it has to
+    /// keep loading, as a list of one.
+    #[test]
+    fn a_single_name_still_loads_as_a_list_of_one() {
+        let settings: Settings = toml::from_str("menu_bar = \"weekly\"\n").unwrap();
+        assert_eq!(settings.menu_bar, vec![MenuBarLimit::Weekly]);
+    }
+
+    #[test]
+    fn a_list_loads_in_the_order_it_is_written() {
+        let settings: Settings =
+            toml::from_str("menu_bar = [\"session\", \"weekly\", \"Fable\"]\n").unwrap();
+        assert_eq!(
+            settings.menu_bar,
+            vec![
+                MenuBarLimit::Session,
+                MenuBarLimit::Weekly,
+                MenuBarLimit::Model("Fable".into())
+            ]
+        );
+    }
+
+    /// A hand-edited file must not be able to leave the menu bar item with
+    /// nothing to draw: no limits, or numbers and rings both off.
+    #[test]
+    fn an_item_with_no_ink_is_clamped_back_to_something() {
+        let empty = Settings {
+            menu_bar: vec![],
+            ..Settings::default()
+        }
+        .clamped();
+        assert_eq!(empty.menu_bar, vec![MenuBarLimit::Session]);
+
+        let blank = Settings {
+            show_percent: false,
+            show_rings: false,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!(blank.show_rings);
+        // Turning the number off is still allowed on its own.
+        let rings_only = Settings {
+            show_percent: false,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!(!rings_only.show_percent);
+        assert!(rings_only.show_rings);
+    }
+
+    /// The menu bar draws the picked limits in snapshot order, and skips a
+    /// setting the account has no limit for.
+    #[test]
+    fn the_picked_limits_come_back_in_snapshot_order() {
+        let limits = vec![
+            Limit {
+                kind: LimitKind::Session,
+                percent: 5.0,
+                resets_at: None,
+            },
+            Limit {
+                kind: LimitKind::Weekly,
+                percent: 45.0,
+                resets_at: None,
+            },
+            Limit {
+                kind: LimitKind::Model("Fable".into()),
+                percent: 52.0,
+                resets_at: None,
+            },
+        ];
+        let settings = Settings {
+            // Written back to front, and naming a model the account does not
+            // have.
+            menu_bar: vec![
+                MenuBarLimit::Model("Opus".into()),
+                MenuBarLimit::Weekly,
+                MenuBarLimit::Session,
+            ],
+            ..Settings::default()
+        };
+        let picked = settings.menu_bar_limits(&limits);
+        assert_eq!(
+            picked.iter().map(|l| l.label()).collect::<Vec<_>>(),
+            vec!["Session", "Week"]
+        );
+    }
+
+    /// One number needs no tag; two do. The setting only decides the second
+    /// case.
+    #[test]
+    fn labels_are_only_drawn_when_there_is_something_to_tell_apart() {
+        let on = Settings::default();
+        assert!(!on.labels_shown(1));
+        assert!(on.labels_shown(2));
+        let off = Settings {
+            show_labels: false,
+            ..Settings::default()
+        };
+        assert!(!off.labels_shown(2));
     }
 
     #[test]

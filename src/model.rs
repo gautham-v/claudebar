@@ -40,6 +40,19 @@ impl Limit {
         }
     }
 
+    /// The menu bar's short name for this window, used when the item is
+    /// showing more than one and each number needs saying which it is. The two
+    /// windows get Claude's own shorthand — a five-hour session and a week —
+    /// and a model-scoped window gets the model's name, since that is what the
+    /// popover calls it too.
+    pub fn menu_bar_tag(&self) -> &str {
+        match &self.kind {
+            LimitKind::Session => "5h",
+            LimitKind::Weekly => "wk",
+            LimitKind::Model(name) => name,
+        }
+    }
+
     /// Whether this limit should be drawn in red: less than
     /// `low_remaining_percent` of the window is left. The threshold is passed
     /// in rather than read from a const because it is a setting; the const is
@@ -183,6 +196,24 @@ mod tests {
             ..limit(0.0)
         };
         assert_eq!(fable.label(), "Fable");
+    }
+
+    /// The menu bar's tags are shorter than the popover's labels, and a model
+    /// keeps its own name because that is the only thing that tells two
+    /// model-scoped windows apart.
+    #[test]
+    fn the_menu_bar_tags_are_claudes_own_shorthand() {
+        assert_eq!(limit(0.0).menu_bar_tag(), "5h");
+        let week = Limit {
+            kind: LimitKind::Weekly,
+            ..limit(0.0)
+        };
+        assert_eq!(week.menu_bar_tag(), "wk");
+        let fable = Limit {
+            kind: LimitKind::Model("Fable".into()),
+            ..limit(0.0)
+        };
+        assert_eq!(fable.menu_bar_tag(), "Fable");
     }
 
     /// Today's reset drops the weekday; a later one keeps it, and both read

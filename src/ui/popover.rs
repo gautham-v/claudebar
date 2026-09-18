@@ -216,7 +216,8 @@ impl Popover {
         // its own separator.
         let rows = 5.0;
         let settings = if self.settings_open {
-            SECTION_LABEL_HEIGHT + (self.menu_bar_choices().len() as f32 + 1.0) * ROW_HEIGHT
+            let rows = self.menu_bar_choices().len() + self.drawing_rows().len();
+            SECTION_LABEL_HEIGHT + rows as f32 * ROW_HEIGHT
         } else {
             0.0
         };
@@ -469,52 +470,113 @@ impl Popover {
             .collect()
     }
 
-    /// The rows the Settings disclosure shows in place: what the menu bar
-    /// tracks, and whether it prints the number.
+    /// The rows the Settings disclosure shows in place: which limits the menu
+    /// bar draws, and how it draws them.
     fn settings_rows(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.provider.settings();
+        let choices = self.menu_bar_choices();
+        // The item has to keep drawing something, so the last checked limit
+        // is shown as a checkmark that cannot be cleared rather than one that
+        // silently refuses the click.
+        let picked = choices
+            .iter()
+            .filter(|(choice, _)| settings.shows(choice))
+            .count();
         div()
             .flex()
             .flex_col()
             .child(section_label(self.theme, MENU_BAR_SECTION))
             .children(
-                self.menu_bar_choices()
+                choices
                     .into_iter()
                     .map(|(choice, label)| {
-                        let checked = choice == settings.menu_bar;
+                        let checked = settings.shows(&choice);
                         self.check_row(
                             SharedString::from(format!("row-limit-{}", choice.as_config_str())),
                             label,
                             Some(checked),
                             true,
-                            true,
+                            !(checked && picked == 1),
                             cx,
-                            move |this, cx| this.choose_menu_bar_limit(choice.clone(), cx),
+                            move |this, cx| this.toggle_menu_bar_limit(choice.clone(), cx),
                         )
                         .into_any_element()
                     })
                     .collect::<Vec<_>>(),
             )
-            .child(self.check_row(
-                "row-show-percent".into(),
-                "Show percentage".into(),
-                Some(settings.show_percent),
-                true,
-                true,
-                cx,
-                |this, cx| this.toggle_show_percent(cx),
-            ))
+            .children(
+                self.drawing_rows()
+                    .into_iter()
+                    .map(|row| {
+                        self.check_row(
+                            SharedString::from(format!("row-{}", row.id)),
+                            row.label.into(),
+                            Some(row.checked),
+                            true,
+                            row.enabled,
+                            cx,
+                            move |this, cx| this.toggle_drawing(row.id, cx),
+                        )
+                        .into_any_element()
+                    })
+                    .collect::<Vec<_>>(),
+            )
     }
 
-    /// Point the menu bar item at another limit, persist it, and collapse.
-    fn choose_menu_bar_limit(&mut self, limit: MenuBarLimit, cx: &mut Context<Self>) {
-        self.update_settings(cx, |settings| settings.menu_bar = limit);
+    /// The rows under the limit list: what the item draws for each limit.
+    ///
+    /// The labels row only appears when more than one limit is checked — with
+    /// one number there is nothing to tell apart, so the question would have
+    /// no answer worth giving. The other two cannot both be turned off, or the
+    /// item would have no ink at all, so whichever is the last one standing is
+    /// shown checked and disabled.
+    fn drawing_rows(&self) -> Vec<DrawingRow> {
+        let settings = self.provider.settings();
+        let picked = self
+            .menu_bar_choices()
+            .iter()
+            .filter(|(choice, _)| settings.shows(choice))
+            .count();
+        let mut rows = vec![DrawingRow {
+            id: "show-percent",
+            label: "Show percentage",
+            checked: settings.show_percent,
+            enabled: settings.show_rings || !settings.show_percent,
+        }];
+        if picked > 1 {
+            rows.push(DrawingRow {
+                id: "show-labels",
+                label: "Show labels",
+                checked: settings.show_labels,
+                enabled: true,
+            });
+        }
+        rows.push(DrawingRow {
+            id: "show-rings",
+            label: "Show rings",
+            checked: settings.show_rings,
+            enabled: settings.show_percent || !settings.show_rings,
+        });
+        rows
     }
 
-    /// Turn the menu bar's number on or off, persist it, and collapse.
-    fn toggle_show_percent(&mut self, cx: &mut Context<Self>) {
+    /// Add a limit to what the menu bar draws, or take it away again.
+    fn toggle_menu_bar_limit(&mut self, limit: MenuBarLimit, cx: &mut Context<Self>) {
         self.update_settings(cx, |settings| {
-            settings.show_percent = !settings.show_percent
+            if let Some(at) = settings.menu_bar.iter().position(|l| *l == limit) {
+                settings.menu_bar.remove(at);
+            } else {
+                settings.menu_bar.push(limit);
+            }
+        });
+    }
+
+    /// Flip one of the drawing choices, persist it, and collapse.
+    fn toggle_drawing(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        self.update_settings(cx, |settings| match id {
+            "show-percent" => settings.show_percent = !settings.show_percent,
+            "show-labels" => settings.show_labels = !settings.show_labels,
+            _ => settings.show_rings = !settings.show_rings,
         });
     }
 
@@ -525,6 +587,12 @@ impl Popover {
     fn update_settings(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut Settings)) {
         let mut settings = self.provider.settings();
         change(&mut settings);
+        // Every row that could empty the item is disabled before it is
+        // clicked, so this is the belt on a hand-edited file's braces rather
+        // than a path the menu can take.
+        if settings.menu_bar.is_empty() || (!settings.show_percent && !settings.show_rings) {
+            return;
+        }
         self.provider.set_settings(settings);
         self.settings_open = false;
         cx.notify();
@@ -644,6 +712,18 @@ const LIMIT_BLOCK_HEIGHT: f32 = theme::LINE_TITLE_PX
 pub const NOTICE_HEIGHT: f32 = theme::LINE_TINY_PX;
 /// The label over the limit rows in the Settings section.
 const MENU_BAR_SECTION: &str = "Menu bar shows";
+
+/// One of the "how it draws them" rows under the limit list.
+#[derive(Debug, Clone, Copy)]
+struct DrawingRow {
+    /// Both the row's element id and which setting it flips.
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    /// False for the last choice that is keeping ink in the item: the row
+    /// still shows its checkmark, it just cannot be cleared.
+    enabled: bool,
+}
 const SECTION_LABEL_PAD_TOP: f32 = 6.0;
 const SECTION_LABEL_PAD_BOTTOM: f32 = 2.0;
 const SECTION_LABEL_HEIGHT: f32 =
